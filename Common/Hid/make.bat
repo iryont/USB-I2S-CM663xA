@@ -1,0 +1,1 @@
+c51 ..\Common\Hid\hid.c %C51FLAGS% "OBJECT(hid.obj)"
