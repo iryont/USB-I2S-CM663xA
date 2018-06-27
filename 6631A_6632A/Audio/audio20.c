@@ -94,10 +94,18 @@ USB_INTERFACE code g_Audio20InterfaceAudioCtrl =
 BYTE idata g_AltSpeaker;
 USB_INTERFACE code g_Audio20InterfaceSpeaker = 
 {
+#ifdef _DSD_
+#ifdef _SUPPORT_32BIT_
+	4,
+#else
+	3,
+#endif
+#else
 #ifdef _SUPPORT_32BIT_
 	3,
 #else
 	2,
+#endif
 #endif
 	&g_AltSpeaker,
 
@@ -353,6 +361,16 @@ static BOOL PlayMultiChOpen(BYTE alt)
 #ifdef _SUPPORT_32BIT_
 		case 3: // 2ch 32bits
 			return PlayMultiChStart(DMA_2CH, DMA_32Bit);
+#endif
+
+#ifdef _DSD_
+#ifdef _SUPPORT_32BIT_
+		case 4: // 4ch 32bits
+			return PlayMultiChStart(DMA_4CH, DMA_32Bit);
+#else
+		case 3: // 4ch 32bits
+			return PlayMultiChStart(DMA_4CH, DMA_32Bit);
+#endif
 #endif
 	}
 

@@ -237,7 +237,7 @@ BYTE GetDmaFreq(BYTE endpoint)
 #if (defined(_SUPPORT_384K_) || defined(_SUPPORT_768K_))
 			if(PERI_ReadByte(OSC_CTRL) == 0x02)
 			{
-				if((PERI_ReadByte(DMA_PLAY_8CH_L) & FREQ_MASK) == DMA_192000)
+				if((PERI_ReadByte(DMA_PLAY_8CH_L) & FREQ_MASK) >= DMA_192000)
 					return s_Run768K ? DMA_768000 : DMA_384000;
 				else
 					return s_Run768K ? DMA_705600 : DMA_352800;
@@ -587,7 +587,14 @@ void AudioProcess()
 BOOL PlayMultiChStart(BYTE ch, BYTE format)
 {
 	g_TempByte1 = GetDmaFreq(EP_MULTI_CH_PLAY);
-	PERI_WriteByte(DMA_PLAY_8CH_L, format|g_TempByte1);
+
+	if(ch == DMA_4CH) // DSD
+	{
+		if(g_TempByte1 != DMA_352800 && g_TempByte1 != DMA_384000) // DSD512 only
+			return FALSE;
+	}
+
+	PERI_WriteByte(DMA_PLAY_8CH_L, (PERI_ReadByte(DMA_PLAY_8CH_L)&(~RESOLUTION_MASK))|format);
 
 	g_Index = (g_TempByte1 & FREQ_MASK) >> 3;
 
@@ -598,82 +605,70 @@ BOOL PlayMultiChStart(BYTE ch, BYTE format)
 	// Set sampling rate
 	switch(g_TempByte1)
 	{
-		//case DMA_8000:
-		//	g_TempWord1 = BCLK_LRCK_64|MCLK_LRCK_256|I2S_MODE|I2S_8000;
-		//	g_TempByte2 = FALSE;
-		//	break;
-
-		//case DMA_16000:
-		//	g_TempWord1 = BCLK_LRCK_64|MCLK_LRCK_256|I2S_MODE|I2S_16000;
-		//	g_TempByte2 = FALSE;
-		//	break;
-
-		//case DMA_32000:
-		//	g_TempWord1 = BCLK_LRCK_64|MCLK_LRCK_256|I2S_MODE|I2S_32000;
-		//	g_TempByte2 = FALSE;
-		//	break;
-
 		case DMA_44100:
-			g_TempWord1 = BCLK_LRCK_64|MCLK_LRCK_256|I2S_MODE|I2S_44100;
+			g_TempWord1 = BCLK_LRCK_64|MCLK_LRCK_256|I2S_44100;
 			g_TempByte2 = bmBIT0; // 0 (F3), 0 (F2), 0(F1), 1(F0) -> 44.1kHz
 			g_TempByte3 |= SPDIF_CTRL_44100;
 			break;
 
 		case DMA_48000:
-			g_TempWord1 = BCLK_LRCK_64|MCLK_LRCK_256|I2S_MODE|I2S_48000;
+			g_TempWord1 = BCLK_LRCK_64|MCLK_LRCK_256|I2S_48000;
 			g_TempByte2 = bmBIT1; // 0 (F3), 0 (F2), 1(F1), 0(F0) -> 48kHz
 			g_TempByte3 |= SPDIF_CTRL_48000;
 			break;
 
-		//case DMA_64000:
-		//	g_TempWord1 = BCLK_LRCK_64|MCLK_LRCK_256|I2S_MODE|I2S_64000;
-		//	g_TempByte2 = FALSE;
-		//	break;
-
 		case DMA_88200:
-			g_TempWord1 = BCLK_LRCK_64|MCLK_LRCK_256|I2S_MODE|I2S_88200;
+			g_TempWord1 = BCLK_LRCK_64|MCLK_LRCK_256|I2S_88200;
 			g_TempByte2 = bmBIT1 | bmBIT0; // 0 (F3), 0 (F2), 1(F1), 1(F0) -> 88.2kHz
 			g_TempByte3 |= SPDIF_CTRL_88200;
 			break;
 
 		case DMA_96000:
-			g_TempWord1 = BCLK_LRCK_64|MCLK_LRCK_256|I2S_MODE|I2S_96000;
+			g_TempWord1 = BCLK_LRCK_64|MCLK_LRCK_256|I2S_96000;
 			g_TempByte2 = bmBIT2; // 0 (F3), 1 (F2), 0(F1), 0(F0) -> 96kHz
 			g_TempByte3 |= SPDIF_CTRL_96000;
 			break;
 
 		case DMA_176400:
-			g_TempWord1 = BCLK_LRCK_64|MCLK_LRCK_128|I2S_MODE|I2S_176400;
+			g_TempWord1 = BCLK_LRCK_64|MCLK_LRCK_128|I2S_176400;
 			g_TempByte2 = bmBIT2 | bmBIT0; // 0 (F3), 1 (F2), 0(F1), 1(F0) -> 176.4kHz
 			g_TempByte3 |= SPDIF_CTRL_176400;
 			break;
 
 		case DMA_192000:
-			g_TempWord1 = BCLK_LRCK_64|MCLK_LRCK_128|I2S_MODE|I2S_192000;
+			g_TempWord1 = BCLK_LRCK_64|MCLK_LRCK_128|I2S_192000;
 			g_TempByte2 = bmBIT2 | bmBIT1; // 0 (F3), 1 (F2), 1(F1), 0(F0) -> 192kHz
 			g_TempByte3 |= SPDIF_CTRL_192000;
 			break;
 
 		case DMA_352800:
-			g_TempWord1 = BCLK_LRCK_64|MCLK_LRCK_128|I2S_MODE|I2S_176400;
-			g_TempByte2 = bmBIT2 | bmBIT1 | bmBIT0; // 0 (F3), 1 (F2), 1(F1), 1(F0) -> 352.8kHz
+			if(ch == DMA_4CH) // DSD512
+				g_TempByte2 = bmBIT3 | bmBIT1 | bmBIT0; // 1 (F3), 0 (F2), 1(F1), 1(F0) -> 705.6kHz (native DSD)
+			else
+				g_TempByte2 = bmBIT2 | bmBIT1 | bmBIT0; // 0 (F3), 1 (F2), 1(F1), 1(F0) -> 352.8kHz
+
+			g_TempWord1 = BCLK_LRCK_64|MCLK_LRCK_128|I2S_176400;
 			g_TempByte3 |= SPDIF_CTRL_176400;
 			break;
 
 		case DMA_384000:
-			g_TempWord1 = BCLK_LRCK_64|MCLK_LRCK_128|I2S_MODE|I2S_192000;
-			g_TempByte2 = bmBIT3; // 1 (F3), 0 (F2), 0(F1), 0(F0) -> 384kHz
+			if(ch == DMA_4CH) // DSD512
+				g_TempByte2 = bmBIT3 | bmBIT2; // 1 (F3), 1 (F2), 0(F1), 0(F0) -> 768kHz (native DSD)
+			else
+				g_TempByte2 = bmBIT3; // 1 (F3), 0 (F2), 0(F1), 0(F0) -> 384kHz
+
+			g_TempWord1 = BCLK_LRCK_64|MCLK_LRCK_128|I2S_192000;
 			g_TempByte3 |= SPDIF_CTRL_192000;
 			break;
 
 		case DMA_705600:
-			g_TempWord1 = BCLK_LRCK_64|MCLK_LRCK_128|I2S_MODE|I2S_176400;
+			g_TempWord1 = BCLK_LRCK_64|MCLK_LRCK_128|I2S_176400;
 			g_TempByte2 = bmBIT3 | bmBIT0; // 1 (F3), 0 (F2), 0(F1), 1(F0) -> 705.6kHz
 			g_TempByte3 |= SPDIF_CTRL_176400;
 			break;
 
 		case DMA_768000:
-			g_TempWord1 = BCLK_LRCK_64|MCLK_LRCK_128|I2S_MODE|I2S_192000;
+			g_TempWord1 = BCLK_LRCK_64|MCLK_LRCK_128|I2S_192000;
 			g_TempByte2 = bmBIT3 | bmBIT1; // 1 (F3), 0 (F2), 1(F1), 0(F0) -> 768kHz
 			g_TempByte3 |= SPDIF_CTRL_192000;
 			break;
@@ -687,9 +682,9 @@ BOOL PlayMultiChStart(BYTE ch, BYTE format)
 #endif
 
 #ifndef _FPGA_SLAVE_
-	g_TempWord1 |= I2S_MASTER;
+	g_TempWord1 |= I2S_MASTER | I2S_MODE;
 #else
-	g_TempWord1 |= MCLK_TRI_STATE;
+	g_TempWord1 |= MCLK_TRI_STATE | LEFT_JUST;
 #endif
 
 	// Set bit resolution
@@ -752,41 +747,21 @@ BOOL PlayMultiChStart(BYTE ch, BYTE format)
 	PERI_WriteWord(I2S_PLAY_8CH_L, g_TempWord1|MCLK_MUTE);	// Set I2S format
 	PERI_WriteByte(I2S_PLAY_8CH_H, PERI_ReadByte(I2S_PLAY_8CH_H) & ~bmBIT4); // Unmute MCLK
 
-	PERI_WriteByte(DMA_PLAY_8CH_H, ch);	// Set channel numbers
+	PERI_WriteByte(DMA_PLAY_8CH_H, DMA_2CH);	// Set channel numbers
 	switch(ch)
 	{
 		case DMA_2CH:
 			PERI_WriteByte(PLAYBACK_ROUTING_H, PLAYBACK_ROUTING_2CH);
 			break;
 
-		case DMA_4CH:
+		case DMA_4CH: // DSD
 #ifdef _MCU_FEEDBACK_
 			s_MultiChFeedbackRatio <<= 1;
 #endif
 
-			g_Index += 20;
-
-			PERI_WriteByte(PLAYBACK_ROUTING_H, PLAYBACK_ROUTING_4CH);
+			g_Index += 20;	
+			PERI_WriteByte(PLAYBACK_ROUTING_H, PLAYBACK_ROUTING_2CH);
 			break;
-
-		case DMA_6CH:
-#ifdef _MCU_FEEDBACK_
-			s_MultiChFeedbackRatio *= 3;
-#endif
-
-			g_Index += 40;
-
-			PERI_WriteByte(PLAYBACK_ROUTING_H, PLAYBACK_ROUTING_6CH);
-			break;		
-
-		case DMA_8CH:
-#ifdef _MCU_FEEDBACK_
-			s_MultiChFeedbackRatio <<= 2;
-#endif
-
-			g_Index += 60;
-
-			PERI_WriteByte(PLAYBACK_ROUTING_H, PLAYBACK_ROUTING_8CH);
 	}
 
 	if(g_IsAudioClass20 && g_UsbIsHighSpeed)
