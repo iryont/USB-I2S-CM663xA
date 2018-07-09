@@ -249,9 +249,7 @@ static void HandleDeconfigured()
 {
 	PERI_WriteByte(PAD_GP10_GP11_CTRL, PERI_ReadByte(PAD_GP10_GP11_CTRL) | bmBIT7); // disable playback
 	PERI_WriteByte(PAD_GP12_GP13_CTRL, PERI_ReadByte(PAD_GP12_GP13_CTRL) | bmBIT3); // disable 44.1
-#ifdef _P1_P2_P3_FREQ_
 	PERI_WriteByte(GPIO_DATA_H, PERI_ReadByte(GPIO_DATA_H) & ~(bmBIT0 | bmBIT2 | bmBIT4)); // disable F3, F2, F1
-#endif
 }
 
 static BOOL HandleVendorCmnd()
@@ -363,9 +361,7 @@ static void GpioInit()
 
 	PERI_WriteByte(PAD_GP10_GP11_CTRL, PERI_ReadByte(PAD_GP10_GP11_CTRL) | bmBIT7); // disable playback
 	PERI_WriteByte(PAD_GP12_GP13_CTRL, PERI_ReadByte(PAD_GP12_GP13_CTRL) | bmBIT3); // disable 44.1
-#ifdef _P1_P2_P3_FREQ_
 	PERI_WriteByte(GPIO_DATA_H, PERI_ReadByte(GPIO_DATA_H) & ~(bmBIT0 | bmBIT2 | bmBIT4)); // disable F3, F2, F1
-#endif
 
 	PERI_WriteByte(GPIO_DATA_H, 0x00);
 }

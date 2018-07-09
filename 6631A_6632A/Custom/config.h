@@ -17,7 +17,6 @@
 //#define _EXT_OSC_22_24_
 #define _EXT_OSC_45_49_
 #define _SUPPORT_32BIT_
-#define _P1_P2_P3_FREQ_
 #define _FPGA_SLAVE_
 
 #ifdef _EXT_OSC_45_49_
@@ -26,13 +25,18 @@
 
 #ifdef _FPGA_SLAVE_
 #define _SUPPORT_768K_
-//define _DSD_
+#define _DSD_
 #endif
 
 #define VENDOR_ID 0x8C0D
 //#define PRODUCT_ID 0x2020
 #define PRODUCT_ID 0x4101
-#define VERSION_ID 0x1010
+
+#ifdef _FPGA_SLAVE_
+#define VERSION_ID 0x2222
+#else
+#define VERSION_ID 0x1111
+#endif
 
 #endif
 

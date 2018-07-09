@@ -76,6 +76,7 @@ static FEEDBACK code s_FeedbackTable[SAMPLING_RATE_NUM] =
 };
 
 static BOOL s_Run768K = FALSE;
+static BOOL s_RunDSD = FALSE;
 
 static WORD s_MultiChCount;
 static WORD s_MultiChCountOld;
@@ -188,6 +189,33 @@ static BYTE code s_mSecondThresholdTable[80] =
 //-----------------------------------------------------------------------------
 // Code
 //-----------------------------------------------------------------------------
+void SetPinFreq(BYTE value)
+{
+	BYTE gpio = PERI_ReadByte(GPIO_DATA_H);
+
+	if(value & bmBIT0)
+		PERI_WriteByte(PAD_GP12_GP13_CTRL, PERI_ReadByte(PAD_GP12_GP13_CTRL) & ~bmBIT3); // enable 44.1
+	else
+		PERI_WriteByte(PAD_GP12_GP13_CTRL, PERI_ReadByte(PAD_GP12_GP13_CTRL) | bmBIT3); // disable 44.1
+
+	if(value & bmBIT3) // F3
+		gpio |= bmBIT0;
+	else
+		gpio &= ~bmBIT0;
+
+	if(value & bmBIT2) // F2
+		gpio |= bmBIT2;
+	else
+		gpio &= ~bmBIT2;
+
+	if(value & bmBIT1) // F1
+		gpio |= bmBIT4;
+	else
+		gpio &= ~bmBIT4;
+
+	PERI_WriteByte(GPIO_DATA_H, gpio);
+}
+
 void ControlByteToFreq(BYTE value)
 {
 	BYTE index;
@@ -592,7 +620,10 @@ BOOL PlayMultiChStart(BYTE ch, BYTE format)
 	{
 		if(g_TempByte1 != DMA_352800 && g_TempByte1 != DMA_384000) // DSD512 only
 			return FALSE;
-	}
+
+		s_RunDSD = TRUE;
+	} else
+		s_RunDSD = FALSE;
 
 	PERI_WriteByte(DMA_PLAY_8CH_L, (PERI_ReadByte(DMA_PLAY_8CH_L)&(~RESOLUTION_MASK))|format);
 
@@ -606,25 +637,25 @@ BOOL PlayMultiChStart(BYTE ch, BYTE format)
 	switch(g_TempByte1)
 	{
 		case DMA_44100:
-			g_TempWord1 = BCLK_LRCK_64|MCLK_LRCK_256|I2S_44100;
+			g_TempWord1 = BCLK_LRCK_64|MCLK_LRCK_128|I2S_44100;
 			g_TempByte2 = bmBIT0; // 0 (F3), 0 (F2), 0(F1), 1(F0) -> 44.1kHz
 			g_TempByte3 |= SPDIF_CTRL_44100;
 			break;
 
 		case DMA_48000:
-			g_TempWord1 = BCLK_LRCK_64|MCLK_LRCK_256|I2S_48000;
+			g_TempWord1 = BCLK_LRCK_64|MCLK_LRCK_128|I2S_48000;
 			g_TempByte2 = bmBIT1; // 0 (F3), 0 (F2), 1(F1), 0(F0) -> 48kHz
 			g_TempByte3 |= SPDIF_CTRL_48000;
 			break;
 
 		case DMA_88200:
-			g_TempWord1 = BCLK_LRCK_64|MCLK_LRCK_256|I2S_88200;
+			g_TempWord1 = BCLK_LRCK_64|MCLK_LRCK_128|I2S_88200;
 			g_TempByte2 = bmBIT1 | bmBIT0; // 0 (F3), 0 (F2), 1(F1), 1(F0) -> 88.2kHz
 			g_TempByte3 |= SPDIF_CTRL_88200;
 			break;
 
 		case DMA_96000:
-			g_TempWord1 = BCLK_LRCK_64|MCLK_LRCK_256|I2S_96000;
+			g_TempWord1 = BCLK_LRCK_64|MCLK_LRCK_128|I2S_96000;
 			g_TempByte2 = bmBIT2; // 0 (F3), 1 (F2), 0(F1), 0(F0) -> 96kHz
 			g_TempByte3 |= SPDIF_CTRL_96000;
 			break;
@@ -717,31 +748,7 @@ BOOL PlayMultiChStart(BYTE ch, BYTE format)
 			g_TempWord1 |= I2S_32Bit;
 	}
 
-	if(g_TempByte2 & bmBIT0)
-		PERI_WriteByte(PAD_GP12_GP13_CTRL, PERI_ReadByte(PAD_GP12_GP13_CTRL) & ~bmBIT3); // enable 44.1
-	else
-		PERI_WriteByte(PAD_GP12_GP13_CTRL, PERI_ReadByte(PAD_GP12_GP13_CTRL) | bmBIT3); // disable 44.1
-
-#ifdef _P1_P2_P3_FREQ_
-	g_TempByte3 = PERI_ReadByte(GPIO_DATA_H);
-
-	if(g_TempByte2 & bmBIT3) // F3
-		g_TempByte3 |= bmBIT0;
-	else
-		g_TempByte3 &= ~bmBIT0;
-
-	if(g_TempByte2 & bmBIT2) // F2
-		g_TempByte3 |= bmBIT2;
-	else
-		g_TempByte3 &= ~bmBIT2;
-
-	if(g_TempByte2 & bmBIT1) // F1
-		g_TempByte3 |= bmBIT4;
-	else
-		g_TempByte3 &= ~bmBIT4;
-
-	PERI_WriteByte(GPIO_DATA_H, g_TempByte3);
-#endif
+	SetPinFreq(g_TempByte2);
 
 	PERI_WriteByte(I2S_PLAY_8CH_H, PERI_ReadByte(I2S_PLAY_8CH_H) | bmBIT4); // Mute MCLK
 	PERI_WriteWord(I2S_PLAY_8CH_L, g_TempWord1|MCLK_MUTE);	// Set I2S format
@@ -800,15 +807,26 @@ BOOL PlayMultiChStart(BYTE ch, BYTE format)
 #endif
 
 	PERI_WriteByte(DMA_PLAY_8CH_L, PERI_ReadByte(DMA_PLAY_8CH_L)|DMA_START);
-
 	PlaybackAddRef(PLAY_8CH);
+
 	return TRUE;
 }
 
 BOOL PlayMultiChStop()
 {
 	PERI_WriteByte(DMA_PLAY_8CH_L, PERI_ReadByte(DMA_PLAY_8CH_L) & ~bmBIT0);
-	PlaybackReleaseRef(PLAY_8CH);	
+	PlaybackReleaseRef(PLAY_8CH);
+
+	if(s_RunDSD)
+	{
+		g_TempByte1 = GetDmaFreq(EP_MULTI_CH_PLAY);
+		if(g_TempByte1 == DMA_352800)
+			SetPinFreq(bmBIT3 | bmBIT0); // 1 (F3), 0 (F2), 0(F1), 1(F0) -> 705.6kHz
+		else if(g_TempByte1 == DMA_384000)
+			SetPinFreq(bmBIT3 | bmBIT1); // 1 (F3), 0 (F2), 1(F1), 0(F0) -> 768kHz
+
+		s_RunDSD = FALSE;
+	}
 
 #ifdef _MCU_FEEDBACK_
 	s_MultiChFeedbackStart = FALSE;
