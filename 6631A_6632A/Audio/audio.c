@@ -637,25 +637,25 @@ BOOL PlayMultiChStart(BYTE ch, BYTE format)
 	switch(g_TempByte1)
 	{
 		case DMA_44100:
-			g_TempWord1 = BCLK_LRCK_64|MCLK_LRCK_128|I2S_44100;
+			g_TempWord1 = BCLK_LRCK_64|MCLK_LRCK_512|I2S_44100;
 			g_TempByte2 = bmBIT0; // 0 (F3), 0 (F2), 0(F1), 1(F0) -> 44.1kHz
 			g_TempByte3 |= SPDIF_CTRL_44100;
 			break;
 
 		case DMA_48000:
-			g_TempWord1 = BCLK_LRCK_64|MCLK_LRCK_128|I2S_48000;
+			g_TempWord1 = BCLK_LRCK_64|MCLK_LRCK_512|I2S_48000;
 			g_TempByte2 = bmBIT1; // 0 (F3), 0 (F2), 1(F1), 0(F0) -> 48kHz
 			g_TempByte3 |= SPDIF_CTRL_48000;
 			break;
 
 		case DMA_88200:
-			g_TempWord1 = BCLK_LRCK_64|MCLK_LRCK_128|I2S_88200;
+			g_TempWord1 = BCLK_LRCK_64|MCLK_LRCK_256|I2S_88200;
 			g_TempByte2 = bmBIT1 | bmBIT0; // 0 (F3), 0 (F2), 1(F1), 1(F0) -> 88.2kHz
 			g_TempByte3 |= SPDIF_CTRL_88200;
 			break;
 
 		case DMA_96000:
-			g_TempWord1 = BCLK_LRCK_64|MCLK_LRCK_128|I2S_96000;
+			g_TempWord1 = BCLK_LRCK_64|MCLK_LRCK_256|I2S_96000;
 			g_TempByte2 = bmBIT2; // 0 (F3), 1 (F2), 0(F1), 0(F0) -> 96kHz
 			g_TempByte3 |= SPDIF_CTRL_96000;
 			break;
