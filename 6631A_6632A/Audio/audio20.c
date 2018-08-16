@@ -228,14 +228,94 @@ static BYTE idata s_CurrentClock[CLOCK_SOURCE_DSCR_NUM] =
 //-----------------------------------------------------------------------------
 // Code
 //-----------------------------------------------------------------------------
+static BOOL HandleVolume(BOOL data_out_stage)
+{
+	for(g_Index = 0; g_Index < VOLUME_DSCR_NUM; ++g_Index)
+	{
+		if((g_UsbRequest.index_H == g_VolumeTable[g_Index].id) && 
+			(g_UsbRequest.value_L == g_VolumeTable[g_Index].ch))
+			break;
+	}
+	
+	if(VOLUME_DSCR_NUM == g_Index)
+	{
+		return FALSE;
+	}
+	
+	if(g_UsbRequest.type & bmBIT7) // Device to Host, Get request
+	{
+		if(CMD_CURRENT == g_UsbRequest.request)
+		{
+			g_TempWord1 = GetCurrentVolume(g_Index);
+			g_UsbCtrlData[0] = LSB(g_TempWord1);
+			g_UsbCtrlData[1] = MSB(g_TempWord1);
+			SetUsbCtrlData(g_UsbCtrlData, 2);
+			return TRUE;
+		}	  
+		else if(CMD_RANGE == g_UsbRequest.request)
+		{
+			g_UsbCtrlData[0] = 1;
+			g_UsbCtrlData[1] = 0;
+			g_UsbCtrlData[2] = LSB(g_VolumeTable[g_Index].min);
+			g_UsbCtrlData[3] = MSB(g_VolumeTable[g_Index].min);
+			g_UsbCtrlData[4] = LSB(g_VolumeTable[g_Index].max);
+			g_UsbCtrlData[5] = MSB(g_VolumeTable[g_Index].max);
+			g_UsbCtrlData[6] = LSB(g_VolumeTable[g_Index].res);
+			g_UsbCtrlData[7] = MSB(g_VolumeTable[g_Index].res);
+			SetUsbCtrlData(g_UsbCtrlData, 8);
+			return TRUE;
+		}
+	}
+	else
+	{
+		if(CMD_CURRENT == g_UsbRequest.request)
+		{
+			if(data_out_stage)
+			{
+				SetCurrentVolume(g_Index, (g_UsbCtrlData[1] << 8) | g_UsbCtrlData[0]);
+			}
+			else
+			{
+				SetUsbCtrlData(g_UsbCtrlData, 2);
+			}
+			return TRUE;
+		}
+	}      
+	
+	return FALSE;
+}
+
 static BOOL HandleMute(BOOL data_out_stage)
 {
 	if((g_UsbRequest.value_L == 0) && (CMD_CURRENT == g_UsbRequest.request)) /* CN = 0 */
 	{
+		for(g_Index = 0; g_Index<MUTE_DSCR_NUM; ++g_Index)
+		{
+			if(g_UsbRequest.index_H == g_MuteTable[g_Index])
+				break;
+		}		
+	
+		if(MUTE_DSCR_NUM == g_Index)
+		{
+			return FALSE;
+		}
+	
 		if(g_UsbRequest.type & bmBIT7) // Device to Host, Get request
 		{
-			g_UsbCtrlData[0] = 0;
+			g_UsbCtrlData[0] = GetCurrentMute(g_Index);
 			SetUsbCtrlData(g_UsbCtrlData, 1);
+			return TRUE;
+		}
+		else
+		{
+			if(data_out_stage)
+			{
+				SetCurrentMute(g_Index, g_UsbCtrlData[0]);
+			}
+			else
+			{
+				SetUsbCtrlData(g_UsbCtrlData, 1);
+			}
 			return TRUE;
 		}
 	}
@@ -259,6 +339,7 @@ static BOOL HandleClockValid()
 			return FALSE;
 		}
 
+		g_UsbCtrlData[0] = 1;
 		SetUsbCtrlData(g_UsbCtrlData, 1);
 		return TRUE;
 	}
@@ -388,7 +469,7 @@ static BOOL HandleControlCmnd()
 		}
 		else if(g_UsbRequest.value_H == 2) // Volume Control
 		{
-			return FALSE;
+			return HandleVolume(FALSE);
 		}
 		else if(g_UsbRequest.value_H == 7) // Auto Gain Control 
 		{
@@ -422,7 +503,7 @@ static BOOL HandleControlDataOut()
 		}
 		else if(g_UsbRequest.value_H == 2) // Volume Control
 		{
-			return FALSE;
+			return HandleVolume(TRUE);
 		}
 		else if(g_UsbRequest.value_H == 7) // Auto Gain Control 
 		{

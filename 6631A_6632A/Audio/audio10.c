@@ -115,6 +115,57 @@ static BYTE code AudioUnitTable[] =
 //-----------------------------------------------------------------------------
 static BOOL HandleVolume(BOOL data_out_stage)
 {
+	for(g_Index = 0; g_Index < VOLUME_DSCR_NUM; ++g_Index)
+	{
+		if((g_UsbRequest.index_H == g_VolumeTable[g_Index].id) && 
+				(g_UsbRequest.value_L == g_VolumeTable[g_Index].ch))
+			break;
+	}
+	
+	if(VOLUME_DSCR_NUM == g_Index)
+	{
+		return FALSE;
+	}
+
+	switch(g_UsbRequest.request)
+	{
+		case CMD_GET_MIN:
+			g_UsbCtrlData[0] = LSB(g_VolumeTable[g_Index].min);
+			g_UsbCtrlData[1] = MSB(g_VolumeTable[g_Index].min);
+			SetUsbCtrlData(g_UsbCtrlData, 2);
+			return TRUE;
+
+		case CMD_GET_MAX:
+			g_UsbCtrlData[0] = LSB(g_VolumeTable[g_Index].max);
+			g_UsbCtrlData[1] = MSB(g_VolumeTable[g_Index].max);
+			SetUsbCtrlData(g_UsbCtrlData, 2);
+			return TRUE;
+
+		case CMD_GET_RES:
+			g_UsbCtrlData[0] = LSB(g_VolumeTable[g_Index].res);
+			g_UsbCtrlData[1] = MSB(g_VolumeTable[g_Index].res);
+			SetUsbCtrlData(g_UsbCtrlData, 2);
+			return TRUE;
+
+		case CMD_GET_CURRENT:
+			g_TempWord1 = GetCurrentVolume(g_Index);
+			g_UsbCtrlData[0] = LSB(g_TempWord1);
+			g_UsbCtrlData[1] = MSB(g_TempWord1);
+			SetUsbCtrlData(g_UsbCtrlData, 2);
+			return TRUE;
+
+		case CMD_SET_CURRENT:
+			if(data_out_stage)
+			{
+				SetCurrentVolume(g_Index, (g_UsbCtrlData[1] << 8) | g_UsbCtrlData[0]);
+			}
+			else
+			{
+				SetUsbCtrlData(g_UsbCtrlData, 2);
+			}
+			return TRUE;
+	}
+
 	return FALSE;
 }
 
@@ -122,15 +173,34 @@ static BOOL HandleMute(BOOL data_out_stage)
 {
 	if((g_UsbRequest.value_L == 0) || (g_UsbRequest.value_L == 0xFF)) /* CN = 0 or 0xFF */
 	{
+		for(g_Index = 0; g_Index < MUTE_DSCR_NUM; ++g_Index)
+		{
+			if(g_UsbRequest.index_H == g_MuteTable[g_Index])
+				break;			
+		}
+
+		if(MUTE_DSCR_NUM == g_Index)
+		{
+			return FALSE;
+		}
+	
 		switch(g_UsbRequest.request)
 		{
 			case CMD_GET_CURRENT:
-				g_UsbCtrlData[0] = 0;
+				g_UsbCtrlData[0] = GetCurrentMute(g_Index);
 				SetUsbCtrlData(g_UsbCtrlData, 1);
 				return TRUE;
 
 			case CMD_SET_CURRENT:
-				break;
+				if(data_out_stage)
+				{
+					SetCurrentMute(g_Index, g_UsbCtrlData[0]);
+				}
+				else
+				{
+					SetUsbCtrlData(g_UsbCtrlData, 1);
+				}
+				return TRUE;
 		}
 	}
 	

@@ -15,6 +15,12 @@
 
 #define IS_PLAYING(index) (s_bPlaybackStartCount & (1 << index))
 
+enum
+{
+	VOL_DAC = 0,
+	VOL_DUMMY
+};
+
 enum	// DMA ID
 {
 	PLAY_8CH
@@ -49,6 +55,22 @@ static BYTE code s_SamplingRateTable[SAMPLING_RATE_NUM][5] =
 	{0x0B, 0xB8, 0x00, DMA_768000, 768}
 };
 
+VOLUME_DSCR code g_VolumeTable[VOLUME_DSCR_NUM] = 
+{
+	{13,1,0x8800,0,0x0080,VOL_DUMMY},{13,2,0x8800,0,0x0080,VOL_DUMMY}  // -120db ~ 0db, step 0.5 db
+};
+
+static WORD idata s_CurrentVolume[VOLUME_DSCR_NUM] = 
+{
+	0, 0	// 0dB
+};
+
+static BOOL s_Run768K = FALSE;
+static BOOL s_RunDSD = FALSE;
+
+BYTE code g_MuteTable[MUTE_DSCR_NUM] = {13};
+static BYTE idata s_CurrentMute = FALSE;
+
 #ifdef _MCU_FEEDBACK_
 
 typedef struct
@@ -74,9 +96,6 @@ static FEEDBACK code s_FeedbackTable[SAMPLING_RATE_NUM] =
 	{0x5833, 0x34},	// 705.6k
 	{0x6000, 0x00}	// 768k
 };
-
-static BOOL s_Run768K = FALSE;
-static BOOL s_RunDSD = FALSE;
 
 static WORD s_MultiChCount;
 static WORD s_MultiChCountOld;
@@ -337,7 +356,40 @@ static void PlaybackReleaseRef(BYTE index)
 	{
 		PERI_WriteByte(PAD_GP10_GP11_CTRL, PERI_ReadByte(PAD_GP10_GP11_CTRL) & ~bmBIT7); // enable playback
 	}
-}	
+}
+
+BOOL GetCurrentMute(BYTE index)
+{
+	return (s_CurrentMute >> index) & bmBIT0;
+}
+
+void SetCurrentMute(BYTE index, BOOL mute)
+{
+	if(mute)
+		s_CurrentMute = s_CurrentMute | (bmBIT0 << index);
+	else
+		s_CurrentMute = s_CurrentMute & (~(bmBIT0 << index));
+
+	switch(g_MuteTable[index])
+	{
+		case 13: // Speaker
+			if(mute)
+				PERI_WriteByte(DMA_FIFO_MUTE, PERI_ReadByte(DMA_FIFO_MUTE) | bmBIT0);
+			else
+				PERI_WriteByte(DMA_FIFO_MUTE, PERI_ReadByte(DMA_FIFO_MUTE) & ~bmBIT0);
+			break;
+	}
+}
+
+WORD GetCurrentVolume(BYTE index)
+{
+	return s_CurrentVolume[index];
+}
+
+void SetCurrentVolume(BYTE index, WORD volume)
+{
+	s_CurrentVolume[index] = volume;
+}
 
 void AudioInit()
 {
@@ -404,6 +456,12 @@ void AudioInit()
 #endif
 
 	PlaybackResetRef();
+
+	for(g_Index=0; g_Index<MUTE_DSCR_NUM; ++g_Index)
+		SetCurrentMute(g_Index, (s_CurrentMute>>g_Index)&bmBIT0);
+
+	for(g_Index=0; g_Index<VOLUME_DSCR_NUM; ++g_Index)
+		SetCurrentVolume(g_Index, s_CurrentVolume[g_Index]);
 }
 
 #ifdef _MCU_FEEDBACK_
@@ -451,10 +509,10 @@ void HandleIsoFeedback()
 			}
 			else
 			{
-				g_Index = PERI_ReadByte(DMA_PLAY_8CH_L) >> 3;
+				g_Index = (GetDmaFreq(EP_MULTI_CH_PLAY) & FREQ_MASK) >> 3;
 			}
 #else
-			g_Index = PERI_ReadByte(DMA_PLAY_8CH_L) >> 3;
+			g_Index = (GetDmaFreq(EP_MULTI_CH_PLAY) & FREQ_MASK) >> 3;
 #endif
 
 			if(s_MultiChCount > s_MultiChThreshold)
