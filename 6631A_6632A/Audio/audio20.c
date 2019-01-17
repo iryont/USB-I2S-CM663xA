@@ -150,7 +150,30 @@ static BYTE code AudioUnitTable[] =
 	AC_CLKSRC		// 23
 };
 
-#ifdef _SUPPORT_768K_
+#if defined(_SUPPORT_1536K_)
+#define I2S_EHS_CLOSK_SOURCE_RANGE_SIZE 146
+static BYTE code s_I2sExperimentalHighSpeedClockSourceRange[I2S_EHS_CLOSK_SOURCE_RANGE_SIZE] = 
+{
+	12,0,
+//	0x40,0x1F,0x00,0,0x40,0x1F,0x00,0,0,0,0,0,	// 8000
+//	0x80,0x3E,0x00,0,0x80,0x3E,0x00,0,0,0,0,0,	// 16000
+//	0x00,0x7D,0x00,0,0x00,0x7D,0x00,0,0,0,0,0,	// 32000
+	0x44,0xAC,0x00,0,0x44,0xAC,0x00,0,0,0,0,0,	// 44100
+	0x80,0xBB,0x00,0,0x80,0xBB,0x00,0,0,0,0,0,	// 48000
+//	0x00,0xFA,0x00,0,0x00,0xFA,0x00,0,0,0,0,0,	// 64000
+	0x88,0x58,0x01,0,0x88,0x58,0x01,0,0,0,0,0,	// 88200
+	0x00,0x77,0x01,0,0x00,0x77,0x01,0,0,0,0,0,	// 96000
+	0x10,0xB1,0x02,0,0x10,0xB1,0x02,0,0,0,0,0,	// 176400
+	0x00,0xEE,0x02,0,0x00,0xEE,0x02,0,0,0,0,0,	// 192000
+	0x20,0x62,0x05,0,0x20,0x62,0x05,0,0,0,0,0,	// 352800
+	0x00,0xDC,0x05,0,0x00,0xDC,0x05,0,0,0,0,0,	// 384000
+	0x40,0xC4,0x0A,0,0x40,0xC4,0x0A,0,0,0,0,0,	// 705600
+	0x00,0xB8,0x0B,0,0x00,0xB8,0x0B,0,0,0,0,0,	// 768000
+	0x80,0x88,0x15,0,0x80,0x88,0x15,0,0,0,0,0,	// 1411200
+	0x00,0x70,0x17,0,0x00,0x70,0x17,0,0,0,0,0	// 1536000
+};
+#endif
+#if defined(_SUPPORT_768K_)
 #define I2S_HS_CLOSK_SOURCE_RANGE_SIZE 122
 static BYTE code s_I2sHighSpeedClockSourceRange[I2S_HS_CLOSK_SOURCE_RANGE_SIZE] = 
 {
@@ -374,7 +397,15 @@ static BOOL HandleClockFrequency(BOOL data_out_stage)
 		{
 			if(g_UsbIsHighSpeed)
 			{
+#ifdef _SUPPORT_1536K_
+				// only alt-setting 1 of the interface does support up to 1536 kHz
+				//if(*(s_ClockSourceTable[g_Index].pInterface->pAltSetting) == 0)
+					SetUsbCtrlData(s_I2sExperimentalHighSpeedClockSourceRange, I2S_EHS_CLOSK_SOURCE_RANGE_SIZE);
+				//else
+				//	SetUsbCtrlData(s_I2sHighSpeedClockSourceRange, I2S_HS_CLOSK_SOURCE_RANGE_SIZE);
+#else
 				SetUsbCtrlData(s_I2sHighSpeedClockSourceRange, I2S_HS_CLOSK_SOURCE_RANGE_SIZE);
+#endif
 			}
 			else
 			{

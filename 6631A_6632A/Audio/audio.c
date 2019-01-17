@@ -36,7 +36,7 @@ BOOL g_IsAudioClass20;
 //-----------------------------------------------------------------------------
 static BYTE s_bPlaybackStartCount;
 
-#define SAMPLING_RATE_NUM 14
+#define SAMPLING_RATE_NUM 16
 static BYTE code s_SamplingRateTable[SAMPLING_RATE_NUM][5] =
 {
 	{0x00, 0x7D, 0x00, DMA_32000, 32},
@@ -52,7 +52,9 @@ static BYTE code s_SamplingRateTable[SAMPLING_RATE_NUM][5] =
 	{0x05, 0x62, 0x20, DMA_352800, 352},
 	{0x05, 0xDC, 0x00, DMA_384000, 384},
 	{0x0A, 0xC4, 0x40, DMA_705600, 706},
-	{0x0B, 0xB8, 0x00, DMA_768000, 768}
+	{0x0B, 0xB8, 0x00, DMA_768000, 768},
+	{0x15, 0x88, 0x80, DMA_1411200, 1411},
+	{0x17, 0x70, 0x00, DMA_1536000, 1536}
 };
 
 VOLUME_DSCR code g_VolumeTable[VOLUME_DSCR_NUM] = 
@@ -66,6 +68,7 @@ static WORD idata s_CurrentVolume[VOLUME_DSCR_NUM] =
 };
 
 static BOOL s_Run768K = FALSE;
+static BOOL s_Run1536K = FALSE;
 static BOOL s_RunDSD = FALSE;
 
 BYTE code g_MuteTable[MUTE_DSCR_NUM] = {13};
@@ -79,6 +82,10 @@ typedef struct
 	BYTE end;
 } FEEDBACK;
 
+
+// double exp = 32 ms (uframe) * Hz / 1000
+// int mid = (int)exp
+// int end = (exp - mid) * 2^8
 static FEEDBACK code s_FeedbackTable[SAMPLING_RATE_NUM] =
 {
 	{0x0400, 0x00},	// 32k
@@ -94,7 +101,9 @@ static FEEDBACK code s_FeedbackTable[SAMPLING_RATE_NUM] =
 	{0x2C19, 0x9A},	// 352.8k
 	{0x3000, 0x00},	// 384k
 	{0x5833, 0x34},	// 705.6k
-	{0x6000, 0x00}	// 768k
+	{0x6000, 0x00},	// 768k
+	{0xB066, 0x66},	// 1411.2k
+	{0xC000, 0x00}	// 1536k
 };
 
 static WORD s_MultiChCount;
@@ -281,13 +290,27 @@ BYTE GetDmaFreq(BYTE endpoint)
 	switch(endpoint)
 	{
 		case EP_MULTI_CH_PLAY:
-#if (defined(_SUPPORT_384K_) || defined(_SUPPORT_768K_))
+#if (defined(_SUPPORT_384K_) || defined(_SUPPORT_768K_) || defined(_SUPPORT_1536K_))
 			if(PERI_ReadByte(OSC_CTRL) == 0x02)
 			{
 				if((PERI_ReadByte(DMA_PLAY_8CH_L) & FREQ_MASK) >= DMA_192000)
-					return s_Run768K ? DMA_768000 : DMA_384000;
+				{
+					if(s_Run1536K)
+						return DMA_1536000;
+					else if(s_Run768K)
+						return DMA_768000;
+
+					return DMA_384000;
+				}
 				else
-					return s_Run768K ? DMA_705600 : DMA_352800;
+				{
+					if(s_Run1536K)
+						return DMA_1411200;
+					else if(s_Run768K)
+						return DMA_705600;
+
+					return DMA_352800;
+				}
 			}
 #endif
 			return PERI_ReadByte(DMA_PLAY_8CH_L) & FREQ_MASK;
@@ -303,8 +326,8 @@ void SetDmaFreq(BYTE endpoint, BYTE freq)
 	{
 		case EP_MULTI_CH_PLAY:         
 
-#if (defined(_SUPPORT_384K_) || defined(_SUPPORT_768K_))
-			if((freq == DMA_384000) || (freq == DMA_352800) || (freq == DMA_768000) || (freq == DMA_705600))
+#if (defined(_SUPPORT_384K_) || defined(_SUPPORT_768K_) || defined(_SUPPORT_1536K_))
+			if((freq == DMA_384000) || (freq == DMA_352800) || (freq == DMA_768000) || (freq == DMA_705600) || (freq == DMA_1536000) || (freq == DMA_1411200))
 			{
 				PERI_WriteByte(OSC_CTRL, 0x02); // OSC is 24.576/22.5792 MHz
 			}
@@ -317,6 +340,11 @@ void SetDmaFreq(BYTE endpoint, BYTE freq)
 				s_Run768K = TRUE;
 			else
 				s_Run768K = FALSE;
+
+			if((freq == DMA_1536000) || (freq == DMA_1411200))
+				s_Run1536K = TRUE;
+			else
+				s_Run1536K = FALSE;
 #endif
 
 			PERI_WriteByte(DMA_PLAY_8CH_L, (PERI_ReadByte(DMA_PLAY_8CH_L)&(~FREQ_MASK))|freq);
@@ -496,7 +524,7 @@ void HandleIsoFeedback()
 			//g_InputReport.reserved2 = LSB(s_MultiChCount);
 			//g_InputReport.offset_high = MSB(s_MultiChThreshold);
 			//g_InputReport.offset_low = LSB(s_MultiChThreshold);
-#if (defined(_SUPPORT_384K_) || defined(_SUPPORT_768K_))
+#if (defined(_SUPPORT_384K_) || defined(_SUPPORT_768K_) || defined(_SUPPORT_1536K_))
 			if(PERI_ReadByte(OSC_CTRL) == 0x02)
 			{
 				if((PERI_ReadByte(DMA_PLAY_8CH_L) & FREQ_MASK) == DMA_192000)
@@ -504,7 +532,9 @@ void HandleIsoFeedback()
 				else
 					g_Index = 10;	// 352800
 
-				if(s_Run768K)
+				if(s_Run1536K)
+					g_Index += 4;
+				else if(s_Run768K)
 					g_Index += 2;
 			}
 			else
@@ -540,7 +570,12 @@ void HandleIsoFeedback()
 
 				if(g_TempWord1)
 				{
-					if(s_Run768K)
+					if(s_Run1536K)
+					{
+						if(g_TempWord1 > 8)
+							g_TempWord1 = 8;
+					}
+					else if(s_Run768K)
 					{
 						if(g_TempWord1 > 4)
 							g_TempWord1 = 4;
@@ -581,7 +616,12 @@ void HandleIsoFeedback()
 
 				if(g_TempWord1)
 				{
-					if(s_Run768K)
+					if(s_Run1536K)
+					{
+						if(g_TempWord1 > 8)
+							g_TempWord1 = 8;
+					}
+					else if(s_Run768K)
 					{
 						if(g_TempWord1 > 4)
 							g_TempWord1 = 4;
@@ -619,7 +659,7 @@ void HandleIsoFeedback()
 			}
 			else
 			{
-#if (defined(_SUPPORT_384K_) || defined(_SUPPORT_768K_))
+#if (defined(_SUPPORT_384K_) || defined(_SUPPORT_768K_) || defined(_SUPPORT_1536K_))
 				if(g_Index >= 10)
 				{
 					MULTI_CH_FEEDBACK_DATA[0] = s_FeedbackTable[g_Index].end;
@@ -762,6 +802,18 @@ BOOL PlayMultiChStart(BYTE ch, BYTE format)
 			g_TempByte3 |= SPDIF_CTRL_192000;
 			break;
 
+		case DMA_1411200:
+			g_TempWord1 = BCLK_LRCK_64|MCLK_LRCK_128|I2S_176400;
+			g_TempByte2 = bmBIT3 | bmBIT2 | bmBIT0; // 1 (F3), 1 (F2), 0(F1), 1(F0) -> 1411.2kHz
+			g_TempByte3 |= SPDIF_CTRL_176400;
+			break;
+
+		case DMA_1536000:
+			g_TempWord1 = BCLK_LRCK_64|MCLK_LRCK_128|I2S_192000;
+			g_TempByte2 = bmBIT3 | bmBIT2 | bmBIT1; // 1 (F3), 1 (F2), 1(F1), 0(F0) -> 1536kHz
+			g_TempByte3 |= SPDIF_CTRL_192000;
+			break;
+
 		default:
 			return FALSE;
 	}
@@ -843,10 +895,14 @@ BOOL PlayMultiChStart(BYTE ch, BYTE format)
 	USB_HANDSHAKE4 = bmBIT3;	// Reset feedback data
 	s_MultiChCountOld = (MULTI_CH_PLAYBACK_COUNT[1] << 8) | MULTI_CH_PLAYBACK_COUNT[0];
 
-#if (defined(_SUPPORT_384K_) || defined(_SUPPORT_768K_))
-	if((g_TempByte1==DMA_384000) || (g_TempByte1==DMA_352800) || (g_TempByte1==DMA_768000) || (g_TempByte1==DMA_705600))
+#if (defined(_SUPPORT_384K_) || defined(_SUPPORT_768K_) || defined(_SUPPORT_1536K_))
+	if((g_TempByte1==DMA_384000) || (g_TempByte1==DMA_352800) || (g_TempByte1==DMA_768000) || (g_TempByte1==DMA_705600) || (g_TempByte1==DMA_1536000) || (g_TempByte1==DMA_1411200))
 	{
-		if(g_TempByte1 == DMA_768000)
+		if(g_TempByte1 == DMA_1536000)
+			g_Index = 15;
+		else if(g_TempByte1 == DMA_1411200)
+			g_Index = 14;
+		else if(g_TempByte1 == DMA_768000)
 			g_Index = 13;
 		else if(g_TempByte1 == DMA_705600)
 			g_Index = 12;

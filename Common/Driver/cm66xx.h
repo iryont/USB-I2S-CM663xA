@@ -326,6 +326,8 @@ enum {
 #define DMA_384000   0xB8
 #define DMA_705600   0xB1
 #define DMA_768000   0xB9
+#define DMA_1411200  0xB2
+#define DMA_1536000  0xBA
 #define DMA_8000     0x40
 #define DMA_16000    0x48
 #define FREQ_MASK    0x78

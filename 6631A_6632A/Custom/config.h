@@ -25,6 +25,7 @@
 
 #ifdef _FPGA_SLAVE_
 #define _SUPPORT_768K_
+#define _SUPPORT_1536K_
 #define _DSD_
 #endif
 
