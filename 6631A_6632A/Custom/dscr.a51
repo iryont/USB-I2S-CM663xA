@@ -143,9 +143,10 @@ StringDscr0End:
 StringDscr1:   
       db   StringDscr1End-StringDscr1
       db   DSCR_STRING
-      db   'D',00
-      db   'I',00
-      db   'Y',00
+      db   'K',00
+      db   'u',00
+      db   'S',00
+      db   'y',00
       db   'A',00
       db   'u',00
       db   'd',00
@@ -157,22 +158,16 @@ StringDscr1End:
 StringDscr2:   
       db   StringDscr2End-StringDscr2
       db   DSCR_STRING
-      db   '.',00
-      db   '3',00
-      db   'l',00
-      db   'i',00
-      db   't',00
-      db   'e',00
+      db   'K',00
+      db   'u',00
+      db   'S',00
+      db   'y',00
       db   ' ',00
-      db   'I',00
-      db   'n',00
-      db   't',00
-      db   'e',00
-      db   'r',00
-      db   'f',00
-      db   'a',00
-      db   'c',00
-      db   'e',00
+      db   'A',00
+      db   'u',00
+      db   'd',00
+      db   'i',00
+      db   'o',00
       db   ' ',00
       db   '2',00
       db   '.',00
@@ -183,22 +178,16 @@ StringDscr2End:
 StringDscr3:   
       db   StringDscr3End-StringDscr3
       db   DSCR_STRING
-      db   '.',00
-      db   '3',00
-      db   'l',00
-      db   'i',00
-      db   't',00
-      db   'e',00
+      db   'K',00
+      db   'u',00
+      db   'S',00
+      db   'y',00
       db   ' ',00
-      db   'I',00
-      db   'n',00
-      db   't',00
-      db   'e',00
-      db   'r',00
-      db   'f',00
-      db   'a',00
-      db   'c',00
-      db   'e',00
+      db   'A',00
+      db   'u',00
+      db   'd',00
+      db   'i',00
+      db   'o',00
       db   ' ',00
       db   '1',00
       db   '.',00

@@ -20,7 +20,7 @@ volatile BOOL g_BulkOutRequest = FALSE;
 volatile BOOL g_Interrupt4InComplete = FALSE;
 volatile BOOL g_Interrupt15InComplete = FALSE;
 
-BYTE g_Index, g_TempByte1, g_TempByte2, g_TempByte3;
+BYTE g_Index, g_TempByte1, g_TempByte2;
 WORD g_TempWord1, g_TempWord2;
 void* g_Pointer;
 

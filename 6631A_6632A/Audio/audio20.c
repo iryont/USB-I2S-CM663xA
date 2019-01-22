@@ -24,6 +24,12 @@ enum
     CMD_MEMORY
 };
 
+enum 
+{
+    CLOCK_INTERNAL = 0,
+    CLOCK_SPDIF
+};
+
 //-----------------------------------------------------------------------------
 // Data Type Definition
 //-----------------------------------------------------------------------------
@@ -50,9 +56,13 @@ BOOL HandleStreamCmnd();
 BOOL HandleStreamDataOut();
 
 BOOL PlayMultiChOpen(BYTE alt);
+BOOL PlaySpdifOpen(BYTE alt);
+BOOL RecSpdifOpen(BYTE alt);
 
 USB_INTERFACE code g_Audio20InterfaceAudioCtrl;
 USB_INTERFACE code g_Audio20InterfaceSpeaker;
+USB_INTERFACE code g_Audio20InterfaceSpdifOut;
+USB_INTERFACE code g_Audio20InterfaceSpdifIn;
 
 static USB_ENDPOINT code s_AudioIntEndpoints[1] = 
 {
@@ -70,6 +80,28 @@ static USB_ENDPOINT code s_SpeakerEndpoints[1] =
 	{
 		EP_MULTI_CH_PLAY,
 		&g_Audio20InterfaceSpeaker,
+
+		NULL,
+		NULL
+	}
+};
+
+static USB_ENDPOINT code s_SpdifOutEndpoints[1] = 
+{
+	{
+		EP_SPDIF_PLAY,
+		&g_Audio20InterfaceSpdifOut,
+
+		NULL,
+		NULL
+	}
+};
+
+static USB_ENDPOINT code s_SpdifInEndpoints[1] = 
+{
+	{
+		EP_SPDIF_REC,
+		&g_Audio20InterfaceSpdifIn,
 
 		NULL,
 		NULL
@@ -111,6 +143,38 @@ USB_INTERFACE code g_Audio20InterfaceSpeaker =
 
 	1,
 	s_SpeakerEndpoints,
+
+	StreamSetInterface,
+	NULL,
+
+	HandleStreamCmnd,
+	HandleStreamDataOut
+};
+
+BYTE idata g_AltSpdifOut;
+USB_INTERFACE code g_Audio20InterfaceSpdifOut = 
+{
+	3,
+	&g_AltSpdifOut,
+
+	1,
+	s_SpdifOutEndpoints,
+
+	StreamSetInterface,
+	NULL,
+
+	HandleStreamCmnd,
+	HandleStreamDataOut
+};
+
+BYTE idata g_AltSpdifIn;
+USB_INTERFACE code g_Audio20InterfaceSpdifIn = 
+{
+	2,
+	&g_AltSpdifIn,
+
+	1,
+	s_SpdifInEndpoints,
 
 	StreamSetInterface,
 	NULL,
@@ -229,6 +293,19 @@ static BYTE code s_I2sHighSpeedClockSourceRange[I2S_HS_CLOSK_SOURCE_RANGE_SIZE] 
 };
 #endif
 
+#define SPDIF_HS_CLOSK_SOURCE_RANGE_SIZE 74
+static BYTE code s_SpdifHighSpeedClockSourceRange[SPDIF_HS_CLOSK_SOURCE_RANGE_SIZE] = 
+{
+	6,0,
+//	0x00,0x7D,0,0,0x00,0x7D,0,0,0,0,0,0,	// 32000
+	0x44,0xAC,0,0,0x44,0xAC,0,0,0,0,0,0,	// 44100
+	0x80,0xBB,0,0,0x80,0xBB,0,0,0,0,0,0,	// 48000
+	0x88,0x58,1,0,0x88,0x58,1,0,0,0,0,0,	// 88200
+	0x00,0x77,1,0,0x00,0x77,1,0,0,0,0,0,	// 96000
+	0x10,0xB1,2,0,0x10,0xB1,2,0,0,0,0,0,	// 176400
+	0x00,0xEE,2,0,0x00,0xEE,2,0,0,0,0,0	// 192000
+};
+
 #define FS_CLOSK_SOURCE_RANGE_SIZE 26
 static BYTE code s_FullSpeedClockSourceRange[FS_CLOSK_SOURCE_RANGE_SIZE] = 
 {
@@ -237,14 +314,18 @@ static BYTE code s_FullSpeedClockSourceRange[FS_CLOSK_SOURCE_RANGE_SIZE] =
 	0x80,0xBB,0,0,0x80,0xBB,0,0,0,0,0,0
 };
 
-#define CLOCK_SOURCE_DSCR_NUM 1
+#define CLOCK_SOURCE_DSCR_NUM 3
 static CLOCK_SOURCE_DSCR code s_ClockSourceTable[CLOCK_SOURCE_DSCR_NUM] = 
 {
-	{18, &g_Audio20InterfaceSpeaker}
+	{18, &g_Audio20InterfaceSpeaker},
+	{19, &g_Audio20InterfaceSpdifOut},
+	{23, &g_Audio20InterfaceSpdifIn}
 };
 
 static BYTE idata s_CurrentClock[CLOCK_SOURCE_DSCR_NUM] = 
 {
+	DMA_48000,
+	DMA_48000,
 	DMA_48000
 };
 
@@ -362,7 +443,15 @@ static BOOL HandleClockValid()
 			return FALSE;
 		}
 
-		g_UsbCtrlData[0] = 1;
+		if((s_ClockSourceTable[g_Index].pInterface->pEndpoints[0].number==EP_SPDIF_REC) && (!g_SpdifLockStatus))
+		{
+			g_UsbCtrlData[0] = 0;
+		}
+		else
+		{
+			g_UsbCtrlData[0] = 1;
+		}
+
 		SetUsbCtrlData(g_UsbCtrlData, 1);
 		return TRUE;
 	}
@@ -387,7 +476,14 @@ static BOOL HandleClockFrequency(BOOL data_out_stage)
 	{
 		if(CMD_CURRENT == g_UsbRequest.request)
 		{
-			g_TempByte1 = s_CurrentClock[g_Index];
+			if(s_ClockSourceTable[g_Index].pInterface->pEndpoints[0].number == EP_SPDIF_REC)
+			{
+				g_TempByte1 = g_SpdifRateStatus;
+			}
+			else
+			{
+				g_TempByte1 = s_CurrentClock[g_Index];
+			}
 
 			ControlByteToFreq(g_TempByte1);
 			SetUsbCtrlData(g_UsbCtrlData, 4);
@@ -397,6 +493,13 @@ static BOOL HandleClockFrequency(BOOL data_out_stage)
 		{
 			if(g_UsbIsHighSpeed)
 			{
+				if((s_ClockSourceTable[g_Index].pInterface->pEndpoints[0].number==EP_SPDIF_REC) || 
+					(s_ClockSourceTable[g_Index].pInterface->pEndpoints[0].number==EP_SPDIF_PLAY))
+				{
+					SetUsbCtrlData(s_SpdifHighSpeedClockSourceRange, SPDIF_HS_CLOSK_SOURCE_RANGE_SIZE);
+				}
+				else
+				{
 #ifdef _SUPPORT_1536K_
 				// only alt-setting 1 of the interface does support up to 1536 kHz
 				//if(*(s_ClockSourceTable[g_Index].pInterface->pAltSetting) == 0)
@@ -406,6 +509,7 @@ static BOOL HandleClockFrequency(BOOL data_out_stage)
 #else
 				SetUsbCtrlData(s_I2sHighSpeedClockSourceRange, I2S_HS_CLOSK_SOURCE_RANGE_SIZE);
 #endif
+				}
 			}
 			else
 			{
@@ -416,6 +520,9 @@ static BOOL HandleClockFrequency(BOOL data_out_stage)
 	}
 	else /* Host to Device, Set request */
 	{
+		//if(s_ClockSourceTable[g_Index].endpoint == EP_SPDIF_REC)
+		//	return FALSE;
+
 		if(CMD_CURRENT == g_UsbRequest.request)
 		{
 			if(data_out_stage)
@@ -432,6 +539,15 @@ static BOOL HandleClockFrequency(BOOL data_out_stage)
 							PlayMultiChStop();
 							PlayMultiChOpen(*(s_ClockSourceTable[g_Index].pInterface->pAltSetting));
 							break;
+
+						case EP_SPDIF_PLAY:
+							PlaySpdifStop();
+							PlaySpdifOpen(*(s_ClockSourceTable[g_Index].pInterface->pAltSetting));
+							break;
+
+						case EP_SPDIF_REC:
+							RecSpdifStop();
+							RecSpdifOpen(*(s_ClockSourceTable[g_Index].pInterface->pAltSetting));
 					}
 				}
 			}
@@ -484,6 +600,87 @@ static BOOL PlayMultiChOpen(BYTE alt)
 			return PlayMultiChStart(DMA_4CH, DMA_32Bit);
 #endif
 #endif
+	}
+
+	return FALSE;
+}
+
+static BOOL PlaySpdifOpen(BYTE alt)
+{
+	for(g_Index = 0; g_Index < CLOCK_SOURCE_DSCR_NUM; ++g_Index)
+	{
+		if(EP_SPDIF_PLAY == s_ClockSourceTable[g_Index].pInterface->pEndpoints[0].number)
+			break;
+	}
+
+	if(CLOCK_SOURCE_DSCR_NUM == g_Index)
+	{
+		return FALSE;
+	}
+
+	SetDmaFreq(EP_SPDIF_PLAY, s_CurrentClock[g_Index]);
+
+	if(g_UsbIsHighSpeed)
+	{
+		switch(alt)
+		{
+			case 1: // 2ch 16bits
+				return PlaySpdifStart(DMA_16Bit);
+		
+			case 2: // 2ch 24bits
+				return PlaySpdifStart(DMA_24Bit);
+				
+			case 3: // 2ch 16bits non-pcm
+				return PlaySpdifStart(DMA_16Bit | NON_PCM);
+		}
+	}
+	else
+	{
+		switch(alt)
+		{
+			case 1: // 2ch 16bits
+				return PlaySpdifStart(DMA_16Bit);
+				
+			case 2: // 2ch 16bits non-pcm
+				return PlaySpdifStart(DMA_16Bit | NON_PCM);
+		}
+	}
+
+	return FALSE;
+}
+
+static BOOL RecSpdifOpen(BYTE alt)
+{
+	for(g_Index = 0; g_Index < CLOCK_SOURCE_DSCR_NUM; ++g_Index)
+	{
+		if(EP_SPDIF_REC == s_ClockSourceTable[g_Index].pInterface->pEndpoints[0].number)
+			break;
+	}
+
+	if(CLOCK_SOURCE_DSCR_NUM == g_Index)
+	{
+		return FALSE;
+	}
+
+	SetDmaFreq(EP_SPDIF_REC, s_CurrentClock[g_Index]);
+
+	if(g_UsbIsHighSpeed)
+	{
+		switch(alt)
+		{
+			case 1: // 2ch 16bits
+				return RecSpdifStart(DMA_16Bit);
+		
+			case 2: // 2ch 24bits
+				return RecSpdifStart(DMA_24Bit);
+		}
+	}
+	else
+	{
+		if(alt == 1)
+		{
+			return RecSpdifStart(DMA_16Bit);
+		}
 	}
 
 	return FALSE;
@@ -565,6 +762,12 @@ static BOOL StreamSetInterface(USB_INTERFACE* pInterface)
 		case EP_MULTI_CH_PLAY:
 			return PlayMultiChOpen(g_UsbRequest.value_L);
 
+		case EP_SPDIF_PLAY:
+			return PlaySpdifOpen(g_UsbRequest.value_L);
+
+		case EP_SPDIF_REC:
+			return RecSpdifOpen(g_UsbRequest.value_L);
+
 		default:
 			return FALSE;
 		}
@@ -575,6 +778,12 @@ static BOOL StreamSetInterface(USB_INTERFACE* pInterface)
 		{
 		case EP_MULTI_CH_PLAY:
 			return PlayMultiChStop();
+
+		case EP_SPDIF_PLAY:
+			return PlaySpdifStop();
+
+		case EP_SPDIF_REC:
+			return RecSpdifStop();
 
 		default:
 			return FALSE;

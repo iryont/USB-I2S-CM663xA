@@ -38,9 +38,9 @@ BOOL HandleStreamDataOut();
 
 USB_INTERFACE code g_Audio10InterfaceSpeaker;
 USB_INTERFACE code g_Audio10InterfaceSpdifOut;
-USB_INTERFACE code g_Audio10InterfaceHeadphone;
-USB_INTERFACE code g_Audio10InterfaceLineIn;
-USB_INTERFACE code g_Audio10InterfaceMicIn;
+//USB_INTERFACE code g_Audio10InterfaceHeadphone;
+//USB_INTERFACE code g_Audio10InterfaceLineIn;
+//USB_INTERFACE code g_Audio10InterfaceMicIn;
 USB_INTERFACE code g_Audio10InterfaceSpdifIn;
 
 static USB_ENDPOINT code s_SpeakerEndpoints[1] = 
@@ -48,6 +48,28 @@ static USB_ENDPOINT code s_SpeakerEndpoints[1] =
 	{
 		EP_MULTI_CH_PLAY,
 		&g_Audio10InterfaceSpeaker,
+
+		HandleStreamCmnd,
+		HandleStreamDataOut
+	}
+};
+
+static USB_ENDPOINT code s_SpdifOutEndpoints[1] = 
+{
+	{
+		EP_SPDIF_PLAY,
+		&g_Audio10InterfaceSpdifOut,
+
+		HandleStreamCmnd,
+		HandleStreamDataOut
+	}
+};
+
+static USB_ENDPOINT code s_SpdifInEndpoints[1] = 
+{
+	{
+		EP_SPDIF_REC,
+		&g_Audio10InterfaceSpdifIn,
 
 		HandleStreamCmnd,
 		HandleStreamDataOut
@@ -77,6 +99,38 @@ USB_INTERFACE code g_Audio10InterfaceSpeaker =
 
 	1,
 	s_SpeakerEndpoints,
+
+	StreamSetInterface,
+	NULL,
+
+	NULL,
+	NULL
+};
+
+extern BYTE idata g_AltSpdifOut;
+USB_INTERFACE code g_Audio10InterfaceSpdifOut = 
+{
+	3,
+	&g_AltSpdifOut,
+
+	1,
+	s_SpdifOutEndpoints,
+
+	StreamSetInterface,
+	NULL,
+
+	NULL,
+	NULL
+};
+
+extern BYTE idata g_AltSpdifIn;
+USB_INTERFACE code g_Audio10InterfaceSpdifIn = 
+{
+	1,
+	&g_AltSpdifIn,
+
+	1,
+	s_SpdifInEndpoints,
 
 	StreamSetInterface,
 	NULL,
@@ -257,6 +311,34 @@ static BOOL PlayMultiChOpen(BYTE alt)
 	return FALSE;
 }
 
+static BOOL PlaySpdifOpen(BYTE alt)
+{
+	switch(alt)
+	{
+		case 1: // 2ch 16bits
+			return PlaySpdifStart(DMA_16Bit);
+	
+		case 2: // 2ch 24bits
+			return PlaySpdifStart(DMA_24Bit);
+
+		case 3: // 2ch 16bits non-pcm
+			return PlaySpdifStart(DMA_16Bit | NON_PCM);
+	}
+
+	return FALSE;
+}
+
+static BOOL RecSpdifOpen(BYTE alt)
+{
+	switch(alt)
+	{
+		case 1: // 2ch 16bits
+			return RecSpdifStart(DMA_16Bit);
+	}
+
+	return FALSE;
+}
+
 static BOOL StreamSetInterface(USB_INTERFACE* pInterface)
 {
 	if(!g_UsbRequest.value_L)
@@ -268,6 +350,12 @@ static BOOL StreamSetInterface(USB_INTERFACE* pInterface)
 		{
 		case EP_MULTI_CH_PLAY:
 			return PlayMultiChStop();
+
+		case EP_SPDIF_PLAY:
+			return PlaySpdifStop();
+
+		case EP_SPDIF_REC:
+			return RecSpdifStop();
 
 		default:
 			return FALSE;
@@ -314,6 +402,14 @@ static BOOL HandleStreamDataOut(USB_ENDPOINT* pEndpoint)
 			case EP_MULTI_CH_PLAY:
 				SetDmaFreq(EP_MULTI_CH_PLAY, FreqToControlByte());
 				return PlayMultiChOpen(g_TempByte1);
+
+			case EP_SPDIF_PLAY:
+				SetDmaFreq(EP_SPDIF_PLAY, FreqToControlByte());
+				return PlaySpdifOpen(g_TempByte1);
+
+			case EP_SPDIF_REC:
+				SetDmaFreq(EP_SPDIF_REC, FreqToControlByte());
+				return RecSpdifOpen(g_TempByte1);
 
 			default:
 				return FALSE;

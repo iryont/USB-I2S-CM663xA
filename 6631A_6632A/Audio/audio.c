@@ -23,13 +23,24 @@ enum
 
 enum	// DMA ID
 {
-	PLAY_8CH
+	PLAY_8CH,
+	PLAY_SPDIF,
+	REC_SPDIF
+};
+
+enum	// DSD
+{
+	DSD_OFF,
+	DSD_ON,
+	DSD_RUNNING,
+	DSD_STOPPING
 };
 
 //-----------------------------------------------------------------------------
 // Global Variables
 //-----------------------------------------------------------------------------
 BOOL g_IsAudioClass20;
+BOOL g_InputSourceSpdif = FALSE;
 
 //-----------------------------------------------------------------------------
 // Static Variables
@@ -69,10 +80,13 @@ static WORD idata s_CurrentVolume[VOLUME_DSCR_NUM] =
 
 static BOOL s_Run768K = FALSE;
 static BOOL s_Run1536K = FALSE;
-static BOOL s_RunDSD = FALSE;
 
 BYTE code g_MuteTable[MUTE_DSCR_NUM] = {13};
 static BYTE idata s_CurrentMute = FALSE;
+static BOOL s_RecordMute = FALSE;
+
+BOOL g_SpdifLockStatus = FALSE;
+BYTE idata g_SpdifRateStatus = DMA_48000;
 
 #ifdef _MCU_FEEDBACK_
 
@@ -106,11 +120,15 @@ static FEEDBACK code s_FeedbackTable[SAMPLING_RATE_NUM] =
 	{0xC000, 0x00}	// 1536k
 };
 
-static WORD s_MultiChCount;
-static WORD s_MultiChCountOld;
-static WORD idata s_MultiChThreshold;
-static BYTE idata s_MultiChFeedbackRatio;
-static BOOL s_MultiChFeedbackStart;
+static WORD s_MultiChCount, s_SpdifCount;
+static WORD s_MultiChCountOld, s_SpdifCountOld;
+static WORD idata s_MultiChThreshold, s_SpdifThreshold;
+static BYTE idata s_MultiChFeedbackRatio, s_SpdifFeedbackRatio;
+static BOOL s_MultiChFeedbackStart, s_SpdifFeedbackStart;
+
+#ifdef _DSD_
+static BYTE s_DsdState = DSD_OFF;
+#endif
 
 static BYTE code s_uFrameThresholdTable[80] = 
 {
@@ -315,6 +333,12 @@ BYTE GetDmaFreq(BYTE endpoint)
 #endif
 			return PERI_ReadByte(DMA_PLAY_8CH_L) & FREQ_MASK;
 
+		case EP_SPDIF_PLAY:
+			return PERI_ReadByte(DMA_PLAY_SPDIF) & FREQ_MASK;
+
+		case EP_SPDIF_REC:
+			return PERI_ReadByte(DMA_REC_SPDIF) & FREQ_MASK;
+
 		default:
 			return DMA_48000;
 	}
@@ -349,6 +373,13 @@ void SetDmaFreq(BYTE endpoint, BYTE freq)
 
 			PERI_WriteByte(DMA_PLAY_8CH_L, (PERI_ReadByte(DMA_PLAY_8CH_L)&(~FREQ_MASK))|freq);
 			break;
+
+		case EP_SPDIF_PLAY:
+			PERI_WriteByte(DMA_PLAY_SPDIF, (PERI_ReadByte(DMA_PLAY_SPDIF)&(~FREQ_MASK))|freq);
+			break;
+
+		case EP_SPDIF_REC:
+			PERI_WriteByte(DMA_REC_SPDIF, (PERI_ReadByte(DMA_REC_SPDIF)&(~FREQ_MASK))|freq);
 
 		default: break;
 	}
@@ -386,6 +417,92 @@ static void PlaybackReleaseRef(BYTE index)
 	}
 }
 
+static BYTE GetSpdifInSamplingRate()
+{
+	switch(PERI_ReadByte(SPDIF_IN_STATUS_3) & 0x0F)
+	{
+		case SPDIF_STATUS_44100:
+			return DMA_44100;
+
+		case SPDIF_STATUS_32000:
+			return DMA_32000;
+
+		case SPDIF_STATUS_88200:
+			return DMA_88200;
+
+		case SPDIF_STATUS_96000:
+			return DMA_96000;
+
+		case SPDIF_STATUS_64000:
+			return DMA_64000;
+
+		case SPDIF_STATUS_176400:
+			return DMA_176400;
+
+		case SPDIF_STATUS_192000:
+			return DMA_192000;
+
+		case SPDIF_STATUS_48000:
+		default:
+			return DMA_48000;
+	}	
+}
+
+static void HandleSpdifIn()
+{
+	static BYTE code s_ClockRateChangeNotify[6] = {0, 1, 0, 1, 0, 23};
+	static BYTE code s_ClockValidChangeNotify[6] = {0, 1, 0, 2, 0, 23};
+
+	g_TempByte1 = PERI_ReadByte(SPDIF_CTRL_1);
+
+	if(g_TempByte1 & bmBIT3)	// Sense
+	{
+		if(g_TempByte1 & bmBIT4)	// Lock
+		{
+			if(!g_SpdifLockStatus)
+			{
+				g_SpdifLockStatus = TRUE;
+				SendInt15Data(s_ClockValidChangeNotify, 6);
+			}
+			else if(g_SpdifRateStatus != GetSpdifInSamplingRate())
+			{
+				g_SpdifRateStatus = GetSpdifInSamplingRate();
+				SendInt15Data(s_ClockRateChangeNotify, 6);
+			}
+		}
+		else		// No Lock
+		{
+			if(g_SpdifLockStatus)
+			{
+				g_SpdifLockStatus = FALSE;
+				SendInt15Data(s_ClockValidChangeNotify, 6);
+			}
+
+			if((PERI_ReadByte(SPDIF_CTRL_2) & bmBIT0) == bmBIT0)
+				PERI_WriteByte(SPDIF_CTRL_2, 0);
+			else
+				PERI_WriteByte(SPDIF_CTRL_2, bmBIT0);							
+		}
+	}
+	else
+	{
+		if(g_SpdifLockStatus)
+		{
+			g_SpdifLockStatus = FALSE;
+			SendInt15Data(s_ClockValidChangeNotify, 6);
+		}
+	}
+
+	if(g_SpdifLockStatus && (GetDmaFreq(EP_SPDIF_REC)==g_SpdifRateStatus))
+	{
+		PERI_WriteByte(RECORD_ROUTING_L, PERI_ReadByte(RECORD_ROUTING_L) & ~bmBIT3);
+	}
+	else
+	{
+		PERI_WriteByte(RECORD_ROUTING_L, PERI_ReadByte(RECORD_ROUTING_L) | bmBIT3);
+	}
+}
+
 BOOL GetCurrentMute(BYTE index)
 {
 	return (s_CurrentMute >> index) & bmBIT0;
@@ -406,6 +523,36 @@ void SetCurrentMute(BYTE index, BOOL mute)
 			else
 				PERI_WriteByte(DMA_FIFO_MUTE, PERI_ReadByte(DMA_FIFO_MUTE) & ~bmBIT0);
 			break;
+
+		case 14:	// SPDIF Out
+			if(mute)
+				PERI_WriteByte(DMA_FIFO_MUTE, PERI_ReadByte(DMA_FIFO_MUTE) | bmBIT1);
+			else
+				PERI_WriteByte(DMA_FIFO_MUTE, PERI_ReadByte(DMA_FIFO_MUTE) & ~bmBIT1);
+			break;
+
+		case 16:	// Mic In
+			if(mute)
+			{
+				PERI_WriteByte(RECORD_MUTE, PERI_ReadByte(RECORD_MUTE) | bmBIT4);
+			}
+			else if(!s_RecordMute)
+			{
+				PERI_WriteByte(RECORD_MUTE, PERI_ReadByte(RECORD_MUTE) & (~bmBIT4));
+			}
+			break;
+
+		case 17:	// Line In
+			if(mute)
+			{
+				PERI_WriteByte(RECORD_MUTE, PERI_ReadByte(RECORD_MUTE) | bmBIT0);
+			}
+			else if(!s_RecordMute)
+			{
+				PERI_WriteByte(RECORD_MUTE, PERI_ReadByte(RECORD_MUTE) & (~bmBIT0));
+			}
+			break;
+
 	}
 }
 
@@ -419,27 +566,43 @@ void SetCurrentVolume(BYTE index, WORD volume)
 	s_CurrentVolume[index] = volume;
 }
 
+void SetRecordMute(BOOL mute)
+{
+	if(mute)
+	{
+		PERI_WriteByte(RECORD_MUTE, PERI_ReadByte(RECORD_MUTE) | bmBIT4 | bmBIT0);
+		PERI_WriteByte(GPIO_DATA_H, PERI_ReadByte(GPIO_DATA_H) | bmBIT7);		
+	}
+	else
+	{
+		if(!GetCurrentMute(3))
+			PERI_WriteByte(RECORD_MUTE, PERI_ReadByte(RECORD_MUTE) & (~bmBIT4));
+
+		if(!GetCurrentMute(4))
+			PERI_WriteByte(RECORD_MUTE, PERI_ReadByte(RECORD_MUTE) & (~bmBIT0));
+
+		PERI_WriteByte(GPIO_DATA_H, PERI_ReadByte(GPIO_DATA_H) & (~bmBIT7));
+	}		
+
+	s_RecordMute = mute;
+}
+
 void AudioInit()
 {
 	// For improving jitter
 	PERI_WriteByte(PAD_GP24_GP25_CTRL, 0xB8);	// Flash driving current 2mA
 
 	// Mute unused I2S MCLK
-	PERI_WriteByte(I2S_PLAY_SPDIF_H, bmBIT4);
+	//PERI_WriteByte(I2S_PLAY_SPDIF_H, bmBIT4);
 	PERI_WriteByte(I2S_PLAY_2CH_H, bmBIT4);
 	PERI_WriteByte(I2S_REC_8CH_H, bmBIT4);
-	PERI_WriteByte(I2S_REC_2CH_H, bmBIT4);
-	PERI_WriteByte(I2S_REC_SPDIF_H, bmBIT4);
+	//PERI_WriteByte(I2S_REC_2CH_H, bmBIT4);
+	//PERI_WriteByte(I2S_REC_SPDIF_H, bmBIT4);
 
 	PERI_WriteByte(DMA_FIFO_FLUSH, bmBIT6);	// Flush FIFO automatically when FIFO is full
 
-#ifndef _FPGA_SLAVE_
-	PERI_WriteByte(PLAYBACK_ROUTING_L, 0x01);	// SPDIF/OUT sourced from multi-channel playback DMA channel 0, 1
-	PERI_WriteByte(SPDIF_OUT0_STATUS_L, PERI_ReadByte(SPDIF_OUT0_STATUS_L) | bmBIT0);	// Enable SPDIF/OUT
-#else
-	PERI_WriteByte(PLAYBACK_ROUTING_L, 0x00);	// SPDIF/OUT sourced from SPDIF/OUT
-	PERI_WriteByte(SPDIF_OUT0_STATUS_L, PERI_ReadByte(SPDIF_OUT0_STATUS_L) & ~bmBIT0);	// Disable SPDIF/OUT
-#endif
+	PERI_WriteByte(PLAYBACK_ROUTING_L, MULTI_CH_PLAY_ROUTE_I2S|SPDIF_PLAY_ROUTE_SPDIF); 
+	PERI_WriteByte(RECORD_ROUTING_L, SPDIF_REC_ROUTE_SPDIF);
 
 	s_bPlaybackStartCount = 0;
 
@@ -467,6 +630,7 @@ void AudioInit()
 
 #ifdef _MCU_FEEDBACK_
 	s_MultiChFeedbackStart = FALSE;
+	s_SpdifFeedbackStart = FALSE;
 
 	PERI_WriteByte(MISC_FUNCTION_CTRL, PERI_ReadByte(MISC_FUNCTION_CTRL) | bmBIT6); //set playback sync. to SOF
 	USB_HANDSHAKE3 = 0x1D;	// Enable 32ms SOF interrupt and MCU feedback control
@@ -490,6 +654,11 @@ void AudioInit()
 
 	for(g_Index=0; g_Index<VOLUME_DSCR_NUM; ++g_Index)
 		SetCurrentVolume(g_Index, s_CurrentVolume[g_Index]);
+
+#ifdef _DSD_
+	PERI_WriteByte(GPIO_DATA_H, PERI_ReadByte(GPIO_DATA_H) & ~bmBIT7);  // GPIO15 -> DSD off
+	s_DsdState = DSD_OFF;
+#endif
 }
 
 #ifdef _MCU_FEEDBACK_
@@ -501,6 +670,7 @@ void HandleIsoFeedback()
 		USB_HANDSHAKE2 = bmBIT4;	// Clear interrupt status
 
 		s_MultiChCount = PERI_ReadWord(MULTI_CH_FIFO_REMAIN_L);
+		s_SpdifCount = PERI_ReadWord(SPDIF_FIFO_REMAIN_L);
 
 		if((!s_MultiChFeedbackStart) && IS_PLAYING(PLAY_8CH))
 		{
@@ -514,6 +684,22 @@ void HandleIsoFeedback()
 				if((!g_IsAudioClass20) && g_UsbIsHighSpeed)
 				{
 					s_MultiChThreshold = s_MultiChCount + 64;
+				}
+			}
+		}
+
+		if((!s_SpdifFeedbackStart) && IS_PLAYING(PLAY_SPDIF))
+		{
+			g_TempWord1 = (SPDIF_PLAYBACK_COUNT[1] << 8) | SPDIF_PLAYBACK_COUNT[0];
+
+			if(s_SpdifCountOld != g_TempWord1)
+			{
+				s_SpdifFeedbackStart = TRUE;
+				s_SpdifCountOld = s_SpdifCount;
+
+				if((!g_IsAudioClass20) && g_UsbIsHighSpeed)
+				{
+					s_SpdifThreshold = s_SpdifCount + 64;
 				}
 			}
 		}
@@ -679,6 +865,91 @@ void HandleIsoFeedback()
 
 			//SendInt4Data((BYTE*)(&g_InputReport), INPUT_REPORT_SIZE);
 		}
+
+		if(s_SpdifFeedbackStart)
+		{
+			//g_InputReport.reserved1 = MSB(s_SpdifCount);
+			//g_InputReport.reserved2 = LSB(s_SpdifCount);
+			//g_InputReport.offset_high = MSB(s_SpdifThreshold);
+			//g_InputReport.offset_low = LSB(s_SpdifThreshold);
+
+			g_Index = PERI_ReadByte(DMA_PLAY_SPDIF) >> 3;
+
+			if(s_SpdifCount > s_SpdifThreshold)
+			{
+				g_TempWord1 = s_SpdifCount - s_SpdifThreshold;
+
+				if(s_SpdifCount < s_SpdifCountOld)
+					g_TempWord1 >>= 5;
+
+				s_SpdifCountOld = s_SpdifCount;
+
+				if(s_SpdifFeedbackRatio)
+				{
+					g_TempWord1 /= s_SpdifFeedbackRatio;
+				}
+
+				if(g_TempWord1)
+				{
+					if(g_TempWord1 > 2)
+						g_TempWord1 = 2;
+
+					//g_InputReport.source = LSB(g_TempWord1) | bmBIT7;
+
+					g_TempWord1 = s_FeedbackTable[g_Index].mid - g_TempWord1;
+				}
+			}
+			else
+			{
+				g_TempWord1 = s_SpdifThreshold - s_SpdifCount;
+
+				if(s_SpdifCount > s_SpdifCountOld)
+					g_TempWord1 >>= 5;
+
+				s_SpdifCountOld = s_SpdifCount;
+
+				if(s_SpdifFeedbackRatio)
+				{
+					g_TempWord1 /= s_SpdifFeedbackRatio;
+				}
+
+				if(g_TempWord1)
+				{
+					if(g_TempWord1 > 2)
+						g_TempWord1 = 2;
+
+					//g_InputReport.source = LSB(g_TempWord1);
+
+					g_TempWord1 = s_FeedbackTable[g_Index].mid + g_TempWord1;
+				}
+			}
+
+			if(g_TempWord1)
+			{
+				if(g_IsAudioClass20 && g_UsbIsHighSpeed)
+				{
+					SPDIF_FEEDBACK_DATA[0] = s_FeedbackTable[g_Index].end;
+					SPDIF_FEEDBACK_DATA[1] = LSB(g_TempWord1);
+					SPDIF_FEEDBACK_DATA[2] = MSB(g_TempWord1);
+				}
+				else
+				{
+					SPDIF_FEEDBACK_DATA[0] = (s_FeedbackTable[g_Index].end << 3);
+					g_TempWord1 = ((g_TempWord1<<3) | ((s_FeedbackTable[g_Index].end & 0xE0) >> 5));
+					SPDIF_FEEDBACK_DATA[1] = LSB(g_TempWord1);
+					SPDIF_FEEDBACK_DATA[2] = MSB(g_TempWord1);
+				}
+
+				SPDIF_FEEDBACK_DATA[3] = 0;
+				USB_HANDSHAKE4 = bmBIT1;
+			}
+			else
+			{
+				USB_HANDSHAKE4 = bmBIT4;	// Reset feedback data
+			}
+
+			//SendInt4Data((BYTE*)(&g_InputReport), INPUT_REPORT_SIZE);
+		}
 	}
 }
 
@@ -690,9 +961,37 @@ void AudioProcess()
 	HandleIsoFeedback();
 #endif
 
+#ifdef _DSD_
+
+	if(s_DsdState == DSD_ON)
+	{
+		g_TempWord1 = (MULTI_CH_PLAYBACK_COUNT[1] << 8) | MULTI_CH_PLAYBACK_COUNT[0];
+		if(s_MultiChCountOld != g_TempWord1)
+		{
+			s_DsdState = DSD_RUNNING;
+			PERI_WriteByte(GPIO_DATA_H, PERI_ReadByte(GPIO_DATA_H) | bmBIT7);  // GPIO15 -> DSD on
+		}
+	}
+
+	if((s_DsdState==DSD_RUNNING) && (PERI_ReadWord(MULTI_CH_FIFO_REMAIN_L) < 100))
+	{
+		s_DsdState = DSD_STOPPING;
+		PERI_WriteByte(GPIO_DATA_H, PERI_ReadByte(GPIO_DATA_H) & ~bmBIT7);  // GPIO15 -> DSD off
+	}
+
+	if((s_DsdState==DSD_STOPPING) && (PERI_ReadWord(MULTI_CH_FIFO_REMAIN_L) >= 176))
+	{
+		s_DsdState = DSD_RUNNING;
+		PERI_WriteByte(GPIO_DATA_H, PERI_ReadByte(GPIO_DATA_H) | bmBIT7);  // GPIO15 -> DSD on
+	}
+
+#endif
+
 	if(g_Tick10ms > 10)
 	{
 		g_Tick10ms = 0;
+
+		HandleSpdifIn();
 
 		if(s_bPlaybackStartCount)
 		{
@@ -714,22 +1013,9 @@ BOOL PlayMultiChStart(BYTE ch, BYTE format)
 {
 	g_TempByte1 = GetDmaFreq(EP_MULTI_CH_PLAY);
 
-	if(ch == DMA_4CH) // DSD
-	{
-		if(g_TempByte1 != DMA_352800 && g_TempByte1 != DMA_384000) // DSD512 only
-			return FALSE;
-
-		s_RunDSD = TRUE;
-	} else
-		s_RunDSD = FALSE;
-
 	PERI_WriteByte(DMA_PLAY_8CH_L, (PERI_ReadByte(DMA_PLAY_8CH_L)&(~RESOLUTION_MASK))|format);
 
 	g_Index = (g_TempByte1 & FREQ_MASK) >> 3;
-
-#ifndef _FPGA_SLAVE_
-	g_TempByte3 = PERI_ReadByte(SPDIF_CTRL_3) & 0xF8;
-#endif
 
 	// Set sampling rate
 	switch(g_TempByte1)
@@ -737,95 +1023,76 @@ BOOL PlayMultiChStart(BYTE ch, BYTE format)
 		case DMA_44100:
 			g_TempWord1 = BCLK_LRCK_64|MCLK_LRCK_512|I2S_44100;
 			g_TempByte2 = bmBIT0; // 0 (F3), 0 (F2), 0(F1), 1(F0) -> 44.1kHz
-			g_TempByte3 |= SPDIF_CTRL_44100;
 			break;
 
 		case DMA_48000:
 			g_TempWord1 = BCLK_LRCK_64|MCLK_LRCK_512|I2S_48000;
 			g_TempByte2 = bmBIT1; // 0 (F3), 0 (F2), 1(F1), 0(F0) -> 48kHz
-			g_TempByte3 |= SPDIF_CTRL_48000;
 			break;
 
 		case DMA_88200:
 			g_TempWord1 = BCLK_LRCK_64|MCLK_LRCK_256|I2S_88200;
 			g_TempByte2 = bmBIT1 | bmBIT0; // 0 (F3), 0 (F2), 1(F1), 1(F0) -> 88.2kHz
-			g_TempByte3 |= SPDIF_CTRL_88200;
 			break;
 
 		case DMA_96000:
 			g_TempWord1 = BCLK_LRCK_64|MCLK_LRCK_256|I2S_96000;
 			g_TempByte2 = bmBIT2; // 0 (F3), 1 (F2), 0(F1), 0(F0) -> 96kHz
-			g_TempByte3 |= SPDIF_CTRL_96000;
 			break;
 
 		case DMA_176400:
 			g_TempWord1 = BCLK_LRCK_64|MCLK_LRCK_128|I2S_176400;
 			g_TempByte2 = bmBIT2 | bmBIT0; // 0 (F3), 1 (F2), 0(F1), 1(F0) -> 176.4kHz
-			g_TempByte3 |= SPDIF_CTRL_176400;
 			break;
 
 		case DMA_192000:
 			g_TempWord1 = BCLK_LRCK_64|MCLK_LRCK_128|I2S_192000;
 			g_TempByte2 = bmBIT2 | bmBIT1; // 0 (F3), 1 (F2), 1(F1), 0(F0) -> 192kHz
-			g_TempByte3 |= SPDIF_CTRL_192000;
 			break;
 
 		case DMA_352800:
-			if(ch == DMA_4CH) // DSD512
-				g_TempByte2 = bmBIT3 | bmBIT1 | bmBIT0; // 1 (F3), 0 (F2), 1(F1), 1(F0) -> 705.6kHz (native DSD)
-			else
-				g_TempByte2 = bmBIT2 | bmBIT1 | bmBIT0; // 0 (F3), 1 (F2), 1(F1), 1(F0) -> 352.8kHz
+			g_TempByte2 = bmBIT2 | bmBIT1 | bmBIT0; // 0 (F3), 1 (F2), 1(F1), 1(F0) -> 352.8kHz
 
 			g_TempWord1 = BCLK_LRCK_64|MCLK_LRCK_128|I2S_176400;
-			g_TempByte3 |= SPDIF_CTRL_176400;
 			break;
 
 		case DMA_384000:
-			if(ch == DMA_4CH) // DSD512
-				g_TempByte2 = bmBIT3 | bmBIT2; // 1 (F3), 1 (F2), 0(F1), 0(F0) -> 768kHz (native DSD)
-			else
-				g_TempByte2 = bmBIT3; // 1 (F3), 0 (F2), 0(F1), 0(F0) -> 384kHz
+			g_TempByte2 = bmBIT3; // 1 (F3), 0 (F2), 0(F1), 0(F0) -> 384kHz
 
 			g_TempWord1 = BCLK_LRCK_64|MCLK_LRCK_128|I2S_192000;
-			g_TempByte3 |= SPDIF_CTRL_192000;
 			break;
 
 		case DMA_705600:
 			g_TempWord1 = BCLK_LRCK_64|MCLK_LRCK_128|I2S_176400;
 			g_TempByte2 = bmBIT3 | bmBIT0; // 1 (F3), 0 (F2), 0(F1), 1(F0) -> 705.6kHz
-			g_TempByte3 |= SPDIF_CTRL_176400;
 			break;
 
 		case DMA_768000:
 			g_TempWord1 = BCLK_LRCK_64|MCLK_LRCK_128|I2S_192000;
 			g_TempByte2 = bmBIT3 | bmBIT1; // 1 (F3), 0 (F2), 1(F1), 0(F0) -> 768kHz
-			g_TempByte3 |= SPDIF_CTRL_192000;
 			break;
 
 		case DMA_1411200:
 			g_TempWord1 = BCLK_LRCK_64|MCLK_LRCK_128|I2S_176400;
 			g_TempByte2 = bmBIT3 | bmBIT2 | bmBIT0; // 1 (F3), 1 (F2), 0(F1), 1(F0) -> 1411.2kHz
-			g_TempByte3 |= SPDIF_CTRL_176400;
 			break;
 
 		case DMA_1536000:
 			g_TempWord1 = BCLK_LRCK_64|MCLK_LRCK_128|I2S_192000;
 			g_TempByte2 = bmBIT3 | bmBIT2 | bmBIT1; // 1 (F3), 1 (F2), 1(F1), 0(F0) -> 1536kHz
-			g_TempByte3 |= SPDIF_CTRL_192000;
 			break;
 
 		default:
 			return FALSE;
 	}
 
-#ifndef _FPGA_SLAVE_
-	PERI_WriteByte(SPDIF_CTRL_3, g_TempByte3);
-#endif
-
-#ifndef _FPGA_SLAVE_
-	g_TempWord1 |= I2S_MASTER | I2S_MODE;
+#ifdef _DSD_
+	if(ch == DMA_4CH) // DSD data
+		g_TempWord1 |= I2S_MASTER | LEFT_JUST;
+	else
+		g_TempWord1 |= I2S_MASTER | I2S_MODE;
 #else
-	g_TempWord1 |= MCLK_TRI_STATE | LEFT_JUST;
+	g_TempWord1 |= I2S_MASTER | I2S_MODE;
 #endif
 
 	// Set bit resolution
@@ -864,14 +1131,17 @@ BOOL PlayMultiChStart(BYTE ch, BYTE format)
 	PERI_WriteWord(I2S_PLAY_8CH_L, g_TempWord1|MCLK_MUTE);	// Set I2S format
 	PERI_WriteByte(I2S_PLAY_8CH_H, PERI_ReadByte(I2S_PLAY_8CH_H) & ~bmBIT4); // Unmute MCLK
 
-	PERI_WriteByte(DMA_PLAY_8CH_H, DMA_2CH);	// Set channel numbers
+	PERI_WriteByte(DMA_PLAY_8CH_H, ch);	// Set channel numbers
 	switch(ch)
 	{
 		case DMA_2CH:
 			PERI_WriteByte(PLAYBACK_ROUTING_H, PLAYBACK_ROUTING_2CH);
 			break;
 
+#ifdef _DSD_
 		case DMA_4CH: // DSD
+			s_DsdState = DSD_ON;
+
 #ifdef _MCU_FEEDBACK_
 			s_MultiChFeedbackRatio <<= 1;
 #endif
@@ -879,6 +1149,16 @@ BOOL PlayMultiChStart(BYTE ch, BYTE format)
 			g_Index += 20;	
 			PERI_WriteByte(PLAYBACK_ROUTING_H, PLAYBACK_ROUTING_2CH);
 			break;
+#else
+		case DMA_4CH:
+#ifdef _MCU_FEEDBACK_
+			s_MultiChFeedbackRatio <<= 1;
+#endif
+
+			g_Index += 20;
+			PERI_WriteByte(PLAYBACK_ROUTING_H, PLAYBACK_ROUTING_4CH);
+			break;
+#endif
 	}
 
 	if(g_IsAudioClass20 && g_UsbIsHighSpeed)
@@ -926,31 +1206,241 @@ BOOL PlayMultiChStart(BYTE ch, BYTE format)
 	return TRUE;
 }
 
+BOOL PlaySpdifStart(BYTE format)
+{
+	g_TempByte1 = GetDmaFreq(EP_SPDIF_PLAY);
+	PERI_WriteByte(DMA_PLAY_SPDIF, (format&0x7F)|g_TempByte1);
+
+	g_TempByte2 = PERI_ReadByte(SPDIF_CTRL_3) & 0xF8;
+
+	g_Index = (g_TempByte1 & FREQ_MASK) >> 3;
+
+	// Set sampling rate
+	switch(g_TempByte1)
+	{
+		case DMA_32000:
+			g_TempByte2 |= SPDIF_CTRL_32000;
+			break;
+
+		case DMA_44100:
+			g_TempByte2 |= SPDIF_CTRL_44100;
+			break;
+
+		case DMA_48000:
+			g_TempByte2 |= SPDIF_CTRL_48000;
+			break;
+
+		case DMA_88200:
+			g_TempByte2 |= SPDIF_CTRL_88200;
+			break;		
+
+		case DMA_96000:
+			g_TempByte2 |= SPDIF_CTRL_96000;
+			break;		
+
+		case DMA_176400:
+			g_TempByte2 |= SPDIF_CTRL_176400;
+			break;
+
+		case DMA_192000:
+			g_TempByte2 |= SPDIF_CTRL_192000;
+			break;
+
+		default:
+			return FALSE;
+	}
+
+	PERI_WriteByte(SPDIF_CTRL_3, g_TempByte2);
+
+	// Set bit resolution
+	switch(format & RESOLUTION_MASK)
+	{
+		case DMA_16Bit:
+#ifdef _MCU_FEEDBACK_
+			s_SpdifFeedbackRatio = 1;
+#endif
+
+			break;
+
+		case DMA_24Bit:
+		case DMA_24Bit_32Container:
+		case DMA_32Bit:
+#ifdef _MCU_FEEDBACK_
+			s_SpdifFeedbackRatio = 2;
+#endif
+
+			g_Index += 10;
+			break;
+	}
+
+	if(format & NON_PCM)
+	{
+		PERI_WriteByte(SPDIF_OUT0_STATUS_L, (PERI_ReadByte(SPDIF_OUT0_STATUS_L) | (bmBIT1|bmBIT5)) | bmBIT0);			
+	}
+	else
+	{
+		PERI_WriteByte(SPDIF_OUT0_STATUS_L, (PERI_ReadByte(SPDIF_OUT0_STATUS_L) & ~(bmBIT1|bmBIT5)) | bmBIT0);			
+	}
+
+	if(g_IsAudioClass20 && g_UsbIsHighSpeed)
+		PERI_WriteByte(STARTING_THRESHOLD_SPDIF_L, s_uFrameThresholdTable[g_Index]);
+	else
+		PERI_WriteByte(STARTING_THRESHOLD_SPDIF_L, s_mSecondThresholdTable[g_Index]);
+
+#ifdef _MCU_FEEDBACK_
+	if(g_IsAudioClass20 && g_UsbIsHighSpeed)
+		s_SpdifThreshold = s_uFrameThresholdTable[g_Index];
+	else
+		s_SpdifThreshold = s_mSecondThresholdTable[g_Index];
+
+	USB_HANDSHAKE4 = bmBIT4;	// Reset feedback data
+	s_SpdifCountOld = (SPDIF_PLAYBACK_COUNT[1] << 8) | SPDIF_PLAYBACK_COUNT[0];
+#endif
+
+	PERI_WriteByte(DMA_PLAY_SPDIF, PERI_ReadByte(DMA_PLAY_SPDIF)|DMA_START);
+
+	PlaybackAddRef(PLAY_SPDIF);
+	return TRUE;
+}
+
+BOOL RecSpdifStart(BYTE format)
+{
+	g_TempByte1 = GetDmaFreq(EP_SPDIF_REC);
+	PERI_WriteByte(DMA_REC_SPDIF, format|g_TempByte1);
+
+	g_TempWord2 = GetSamplingRate(g_TempByte1);
+
+	if(g_SpdifLockStatus && (g_TempByte1==g_SpdifRateStatus))
+	{
+		PERI_WriteByte(RECORD_ROUTING_L, PERI_ReadByte(RECORD_ROUTING_L) & ~bmBIT3);
+	}
+	else
+	{
+		PERI_WriteByte(RECORD_ROUTING_L, PERI_ReadByte(RECORD_ROUTING_L) | bmBIT3);
+	}
+
+	if(g_IsAudioClass20 && g_UsbIsHighSpeed)
+		g_TempWord2 = (g_TempWord2/8)+2;
+	else
+		g_TempWord2 = g_TempWord2+2;
+
+	// Set sampling rate
+	switch(g_TempByte1)
+	{
+		case DMA_32000:
+			g_TempWord1 = BCLK_LRCK_128|I2S_MASTER|MCLK_LRCK_256|I2S_MODE|I2S_32000;
+			break;
+
+		case DMA_44100:
+			g_TempWord1 = BCLK_LRCK_128|I2S_MASTER|MCLK_LRCK_256|I2S_MODE|I2S_44100;
+			break;
+
+		case DMA_48000:
+			g_TempWord1 = BCLK_LRCK_128|I2S_MASTER|MCLK_LRCK_256|I2S_MODE|I2S_48000;
+			break;
+
+		case DMA_64000:
+			g_TempWord1 = BCLK_LRCK_128|I2S_MASTER|MCLK_LRCK_256|I2S_MODE|I2S_64000;
+			break;
+
+		case DMA_88200:
+			g_TempWord1 = BCLK_LRCK_64|I2S_MASTER|MCLK_LRCK_256|I2S_MODE|I2S_88200;
+			break;
+
+		case DMA_96000:
+			g_TempWord1 = BCLK_LRCK_64|I2S_MASTER|MCLK_LRCK_256|I2S_MODE|I2S_96000;
+			break;
+
+		case DMA_176400:
+			g_TempWord1 = BCLK_LRCK_64|I2S_MASTER|MCLK_LRCK_128|I2S_MODE|I2S_176400;
+			break;
+
+		case DMA_192000:
+			g_TempWord1 = BCLK_LRCK_64|I2S_MASTER|MCLK_LRCK_128|I2S_MODE|I2S_192000;
+			break;
+
+		default:
+			return FALSE;
+	}
+
+	// Set bit resolution
+	switch(format & RESOLUTION_MASK)
+	{
+		case DMA_16Bit:
+			g_TempWord1 |= I2S_16Bit;
+			g_TempWord2 *= 4;
+			break;
+
+		case DMA_24Bit:
+			g_TempWord1 |= I2S_24Bit;
+			g_TempWord2 *= 6;
+			break;
+
+		case DMA_24Bit_32Container:
+			g_TempWord1 |= I2S_24Bit;
+			g_TempWord2 *= 8;
+			break;
+
+		case DMA_32Bit:
+			g_TempWord1 |= I2S_32Bit;
+			g_TempWord2 *= 8;
+	}
+
+	PERI_WriteByte(I2S_REC_SPDIF_H, PERI_ReadByte(I2S_REC_SPDIF_H) | bmBIT4); // Mute MCLK
+	PERI_WriteWord(I2S_REC_SPDIF_L, g_TempWord1|MCLK_MUTE);	// Set I2S format
+	PERI_WriteByte(I2S_REC_SPDIF_H, PERI_ReadByte(I2S_REC_SPDIF_H) & ~bmBIT4); // Unmute MCLK
+
+	PERI_WriteWord(MAX_DATA_REC_SPDIF_L, g_TempWord2);
+
+	PERI_WriteByte(SPDIF_IN_STATUS_0, 1);
+	PERI_WriteByte(DMA_REC_SPDIF, PERI_ReadByte(DMA_REC_SPDIF)|DMA_START);
+	return TRUE;
+}
+
 BOOL PlayMultiChStop()
 {
 	PERI_WriteByte(DMA_PLAY_8CH_L, PERI_ReadByte(DMA_PLAY_8CH_L) & ~bmBIT0);
 	PlaybackReleaseRef(PLAY_8CH);
 
-	if(s_RunDSD)
-	{
-		g_TempByte1 = GetDmaFreq(EP_MULTI_CH_PLAY);
-		if(g_TempByte1 == DMA_352800)
-			SetPinFreq(bmBIT3 | bmBIT0); // 1 (F3), 0 (F2), 0(F1), 1(F0) -> 705.6kHz
-		else if(g_TempByte1 == DMA_384000)
-			SetPinFreq(bmBIT3 | bmBIT1); // 1 (F3), 0 (F2), 1(F1), 0(F0) -> 768kHz
-
-		s_RunDSD = FALSE;
-	}
-
 #ifdef _MCU_FEEDBACK_
 	s_MultiChFeedbackStart = FALSE;
 #endif
 
+#ifdef _DSD_
+	s_DsdState = DSD_OFF;
+
+	PERI_WriteByte(GPIO_DATA_H, PERI_ReadByte(GPIO_DATA_H) & ~bmBIT7);  // GPIO15 -> DSD off
+#endif
+
+	return TRUE;
+}
+
+BOOL PlaySpdifStop()
+{
+	PERI_WriteByte(SPDIF_OUT0_STATUS_L, PERI_ReadByte(SPDIF_OUT0_STATUS_L) & ~bmBIT0);			
+
+	PERI_WriteByte(DMA_PLAY_SPDIF, PERI_ReadByte(DMA_PLAY_SPDIF) & ~bmBIT0);
+	PlaybackReleaseRef(PLAY_SPDIF);	
+
+#ifdef _MCU_FEEDBACK_
+	s_SpdifFeedbackStart = FALSE;
+#endif
+
+	return TRUE;
+}
+
+BOOL RecSpdifStop()
+{
+	PERI_WriteByte(SPDIF_IN_STATUS_0, 0);
+	PERI_WriteByte(DMA_REC_SPDIF, PERI_ReadByte(DMA_REC_SPDIF) & ~bmBIT0);
 	return TRUE;
 }
 
 void AudioStop()
 {
 	PlayMultiChStop();
+	PlaySpdifStop();
+	RecSpdifStop();
+
 	PlaybackResetRef();
 }

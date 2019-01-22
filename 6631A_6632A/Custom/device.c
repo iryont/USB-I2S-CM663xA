@@ -34,6 +34,8 @@ static USB_INTERFACE* code s_Audio20Interfaces[] =
 {
 	&g_Audio20InterfaceAudioCtrl,
 	&g_Audio20InterfaceSpeaker,
+	&g_Audio20InterfaceSpdifOut,
+	&g_Audio20InterfaceSpdifIn,
 	&g_InterfaceHid
 };
 
@@ -85,6 +87,9 @@ static USB_INTERFACE* code s_Audio10Interfaces[] =
 {
 	&g_Audio10InterfaceAudioCtrl,
 	&g_Audio10InterfaceSpeaker,
+	&g_Audio10InterfaceAudioCtrl,
+	&g_Audio10InterfaceSpdifOut,
+	&g_Audio10InterfaceSpdifIn,
 	&g_InterfaceHid
 };
 
