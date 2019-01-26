@@ -4,7 +4,7 @@
 //-----------------------------------------------------------------------------
 // Configuration Switch
 //-----------------------------------------------------------------------------
-#define _FULL_SPEED_ONLY_
+//#define _FULL_SPEED_ONLY_
 //#define _AUDIO_CLASS_20_ONLY_
 //#define _I2C_SLAVE_SUPPORT_
 

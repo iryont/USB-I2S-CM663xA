@@ -86,10 +86,10 @@ static USB_DEVICE code s_Audio20FullSpeedDevice =
 static USB_INTERFACE* code s_Audio10Interfaces[] = 
 {
 	&g_Audio10InterfaceAudioCtrl,
-	&g_Audio10InterfaceSpeaker,
-	&g_Audio10InterfaceAudioCtrl,
 	&g_Audio10InterfaceSpdifOut,
 	&g_Audio10InterfaceSpdifIn,
+	&g_Audio10InterfaceAudioCtrl,
+	&g_Audio10InterfaceSpeaker,
 	&g_InterfaceHid
 };
 

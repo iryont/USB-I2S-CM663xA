@@ -81,7 +81,7 @@ static WORD idata s_CurrentVolume[VOLUME_DSCR_NUM] =
 static BOOL s_Run768K = FALSE;
 static BOOL s_Run1536K = FALSE;
 
-BYTE code g_MuteTable[MUTE_DSCR_NUM] = {13};
+BYTE code g_MuteTable[MUTE_DSCR_NUM] = {13, 14};
 static BYTE idata s_CurrentMute = FALSE;
 static BOOL s_RecordMute = FALSE;
 
@@ -530,29 +530,6 @@ void SetCurrentMute(BYTE index, BOOL mute)
 			else
 				PERI_WriteByte(DMA_FIFO_MUTE, PERI_ReadByte(DMA_FIFO_MUTE) & ~bmBIT1);
 			break;
-
-		case 16:	// Mic In
-			if(mute)
-			{
-				PERI_WriteByte(RECORD_MUTE, PERI_ReadByte(RECORD_MUTE) | bmBIT4);
-			}
-			else if(!s_RecordMute)
-			{
-				PERI_WriteByte(RECORD_MUTE, PERI_ReadByte(RECORD_MUTE) & (~bmBIT4));
-			}
-			break;
-
-		case 17:	// Line In
-			if(mute)
-			{
-				PERI_WriteByte(RECORD_MUTE, PERI_ReadByte(RECORD_MUTE) | bmBIT0);
-			}
-			else if(!s_RecordMute)
-			{
-				PERI_WriteByte(RECORD_MUTE, PERI_ReadByte(RECORD_MUTE) & (~bmBIT0));
-			}
-			break;
-
 	}
 }
 
