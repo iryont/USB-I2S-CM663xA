@@ -850,7 +850,7 @@ void HandleIsoFeedback()
 			//g_InputReport.offset_high = MSB(s_SpdifThreshold);
 			//g_InputReport.offset_low = LSB(s_SpdifThreshold);
 
-			g_Index = PERI_ReadByte(DMA_PLAY_SPDIF) >> 3;
+			g_Index = (GetDmaFreq(EP_SPDIF_PLAY) & FREQ_MASK) >> 3;
 
 			if(s_SpdifCount > s_SpdifThreshold)
 			{
@@ -1029,13 +1029,11 @@ BOOL PlayMultiChStart(BYTE ch, BYTE format)
 
 		case DMA_352800:
 			g_TempByte2 = bmBIT2 | bmBIT1 | bmBIT0; // 0 (F3), 1 (F2), 1(F1), 1(F0) -> 352.8kHz
-
 			g_TempWord1 = BCLK_LRCK_64|MCLK_LRCK_128|I2S_176400;
 			break;
 
 		case DMA_384000:
 			g_TempByte2 = bmBIT3; // 1 (F3), 0 (F2), 0(F1), 0(F0) -> 384kHz
-
 			g_TempWord1 = BCLK_LRCK_64|MCLK_LRCK_128|I2S_192000;
 			break;
 

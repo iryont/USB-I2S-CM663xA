@@ -181,7 +181,7 @@ void HandleUsbReset()
 
 #else
 
-	if(PERI_ReadByte(GPI_DATA) & bmBIT5)
+	if(!(PERI_ReadByte(GPI_DATA) & bmBIT5))
 	{
 		g_IsAudioClass20 = TRUE;
 
