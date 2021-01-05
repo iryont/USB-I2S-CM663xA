@@ -35,7 +35,7 @@
 //#define _EXT_OSC_22_24_
 #define _EXT_OSC_45_49_
 #define _SUPPORT_32BIT_
-#define _FPGA_SLAVE_
+//#define _FPGA_SLAVE_
 
 #ifdef _EXT_OSC_45_49_
 #define _SUPPORT_384K_
